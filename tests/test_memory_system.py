@@ -1,14 +1,53 @@
 import unittest
+import os
+from dotenv import load_dotenv
 from agentic_memory.memory_system import AgenticMemorySystem, MemoryNote
 from datetime import datetime
+
+# Load environment variables from .env file
+load_dotenv()
 
 class TestAgenticMemorySystem(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test."""
+        # Check for available API keys (excluding placeholders)
+        openai_key = os.getenv('OPENAI_API_KEY', '')
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY', '')
+        
+        # Filter out placeholder keys
+        def is_valid_key(key):
+            return key and not key.startswith('sk-test-placeholder') and not key.startswith('sk-ant-placeholder')
+        
+        valid_openai_key = openai_key if is_valid_key(openai_key) else None
+        valid_anthropic_key = anthropic_key if is_valid_key(anthropic_key) else None
+        
+        # Skip tests if no valid API keys are available
+        if not valid_openai_key and not valid_anthropic_key:
+            self.skipTest("No valid API keys available (OPENAI_API_KEY or ANTHROPIC_API_KEY)")
+        
+        # Respect DEFAULT_LLM_BACKEND preference or fall back to available keys
+        default_backend = os.getenv('DEFAULT_LLM_BACKEND', '').lower()
+        default_model = os.getenv('DEFAULT_LLM_MODEL', '')
+        
+        if default_backend == 'anthropic' and valid_anthropic_key:
+            backend = "anthropic"
+            model = default_model if default_model else "claude-3-haiku-20240307"
+        elif default_backend == 'openai' and valid_openai_key:
+            backend = "openai"
+            model = default_model if default_model else "gpt-4o-mini"
+        elif valid_anthropic_key:
+            # Prefer Anthropic if available and no explicit preference
+            backend = "anthropic"
+            model = "claude-3-haiku-20240307"
+        else:
+            # Fall back to OpenAI
+            backend = "openai"
+            model = "gpt-4o-mini"
+            
         self.memory_system = AgenticMemorySystem(
             model_name='all-MiniLM-L6-v2',
-            llm_backend="openai",
-            llm_model="gpt-4o-mini"
+            llm_backend=backend,
+            llm_model=model
         )
         
     def test_create_memory(self):
