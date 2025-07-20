@@ -120,6 +120,9 @@ class AgenticMemorySystem:
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
         
+        # Initialize sentence transformer for similarity computation
+        self.embedder = SentenceTransformer(model_name)
+        
         # Load existing memories for this session
         self._load_session_memories()
 
@@ -137,25 +140,18 @@ class AgenticMemorySystem:
                             The nearest neighbors memories:
                             {nearest_neighbors_memories}
 
-                            CRITICAL CONSOLIDATION Rules:
-                            1. If the new memory is very similar (>70% content overlap) to ANY neighbor, you MUST consolidate them.
-                            2. If the new memory adds details to an existing memory, you MUST consolidate to integrate the additional information.
-                            3. If two memories describe the same entity/concept with slight variations, you MUST consolidate them.
-                            4. Examples requiring consolidation:
-                               - "The library has books" + "The library has books and scrolls" → CONSOLIDATE
-                               - "Python is a language" + "Python programming language for AI" → CONSOLIDATE
-                               - "The creature is mysterious" + "The creature seems mysterious and ancient" → CONSOLIDATE
+                            Semantic similarity scores between new memory and each neighbor:
+                            {similarity_scores}
+                            (Scores range from 0.0 to 1.0, where >0.7 indicates high similarity suitable for consolidation)
 
                             Based on this information, determine:
                             1. Should this memory be evolved? Consider its relationships with other memories.
-                            2. Is the new memory very similar to any existing neighbor? If so, you MUST CONSOLIDATE.
-                            3. What specific actions should be taken?
+                            2. What specific actions should be taken?
                                - "strengthen": Create stronger connections between memories
                                - "update_neighbor": Update context and tags of neighboring memories
-                               - "consolidate": Merge the new memory with an existing similar memory (REQUIRED for similar content)
+                               - "consolidate": Merge with an existing similar memory if appropriate
                                
-                            CONSOLIDATION DECISION (MANDATORY for similar memories):
-                            If the new memory is similar to any neighbor, you MUST choose "consolidate" and:
+                            For consolidation:
                             - Identify which neighbor memory to consolidate with by using the EXACT "memory id" from the neighbor list (e.g., if you see "memory id:abc123", use "abc123" as consolidate_with_id)
                             - Create a new consolidated content that integrates both memories intelligently
                             - The consolidated memory should be more complete and informative than either original
@@ -515,22 +511,39 @@ class AgenticMemorySystem:
                 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for memories using a hybrid retrieval approach."""
-        # Get results from ChromaDB (only do this once)
-        search_results = self.retriever.search(query, k)
+        # DEBUG: Log search attempt
+        print(f"\n=== DEBUG: Search Debug ===")
+        print(f"Query: {query}")
+        print(f"Session ID: {self.session_id}")
+        print(f"Current memories in self.memories: {list(self.memories.keys())}")
+        
+        # Get results from ChromaDB (only do this once) - filter by session_id
+        search_results = self.retriever.search(query, k, where={"session_id": self.session_id})
+        
+        # DEBUG: Log ChromaDB results
+        print(f"ChromaDB search results: {search_results}")
+        print(f"ChromaDB returned IDs: {search_results.get('ids', [])})")
+        
         memories = []
         
         # Process ChromaDB results
-        for i, doc_id in enumerate(search_results['ids'][0]):
-            memory = self.memories.get(doc_id)
-            if memory:
-                memories.append({
-                    'id': doc_id,
-                    'content': memory.content,
-                    'context': memory.context,
-                    'keywords': memory.keywords,
-                    'score': search_results['distances'][0][i]
-                })
+        if 'ids' in search_results and search_results['ids'] and len(search_results['ids']) > 0:
+            print(f"Processing {len(search_results['ids'][0])} results from ChromaDB")
+            for i, doc_id in enumerate(search_results['ids'][0]):
+                memory = self.memories.get(doc_id)
+                print(f"  Doc ID {doc_id}: Found in self.memories = {memory is not None}")
+                if memory:
+                    memories.append({
+                        'id': doc_id,
+                        'content': memory.content,
+                        'context': memory.context,
+                        'keywords': memory.keywords,
+                        'score': search_results['distances'][0][i]
+                    })
+        else:
+            print("No results returned from ChromaDB")
         
+        print(f"Final search results count: {len(memories)}")
         return memories[:k]
     
     def _search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
@@ -689,6 +702,27 @@ class AgenticMemorySystem:
             neighbors_text, indices = self.find_related_memories(note.content, k=5)
             if not neighbors_text or not indices:
                 return False, note
+            
+            # Compute semantic similarity scores with neighbors
+            similarity_scores = []
+            try:
+                neighbor_contents = []
+                for memory_id in indices:
+                    if memory_id in self.memories:
+                        neighbor_contents.append(self.memories[memory_id].content)
+                
+                if neighbor_contents:
+                    # Encode the new memory content and all neighbor contents
+                    all_contents = [note.content] + neighbor_contents
+                    embeddings = self.embedder.encode(all_contents)
+                    
+                    # Calculate cosine similarity between new memory and each neighbor
+                    for i in range(1, len(embeddings)):
+                        similarity = cosine_similarity([embeddings[0]], [embeddings[i]])[0][0]
+                        similarity_scores.append(f"Memory {indices[i-1]}: {similarity:.3f}")
+            except Exception as e:
+                logger.warning(f"Similarity computation failed: {str(e)}")
+                similarity_scores = ["Similarity computation unavailable"]
                 
             # Query LLM for evolution decision
             prompt = self._evolution_system_prompt.format(
@@ -696,7 +730,8 @@ class AgenticMemorySystem:
                 context=note.context,
                 keywords=note.keywords,
                 nearest_neighbors_memories=neighbors_text,
-                neighbor_number=len(indices)
+                neighbor_number=len(indices),
+                similarity_scores="\n".join(similarity_scores)
             )
             
             try:
@@ -785,16 +820,18 @@ class AgenticMemorySystem:
                                 self.consolidated_id = target_id
                                 self.consolidated_content = content
                         
-                        # DEBUG: Check memory existence
-                        print(f"\n=== DEBUG: Consolidation Memory Check ===")
-                        print(f"Looking for memory ID: {consolidate_with_id}")
-                        print(f"Available memory IDs: {list(self.memories.keys())}")
-                        print(f"Memory exists: {consolidate_with_id in self.memories}")
-                                
+                        # DEBUG: Check memory state before consolidation
+                        print(f"\n=== DEBUG: Consolidation Memory State ===")
+                        print(f"Target memory ID: {consolidate_with_id}")
+                        print(f"Target memory exists in self.memories: {consolidate_with_id in self.memories}")
+                        print(f"Current memory count: {len(self.memories)}")
+                        print(f"Memory IDs: {list(self.memories.keys())}")
+                        
                         # Update the target memory with consolidated content and metadata
                         if consolidate_with_id in self.memories:
                             target_memory = self.memories[consolidate_with_id]
                             target_memory.content = consolidated_content
+                            print(f"Updated target memory content: {target_memory.content[:100]}...")
                             
                             # Update metadata from LLM response
                             tags_to_update = response_json.get("tags_to_update", [])
@@ -850,36 +887,27 @@ class AgenticMemorySystem:
                         elif action == "update_neighbor":
                             new_context_neighborhood = response_json["new_context_neighborhood"]
                             new_tags_neighborhood = response_json["new_tags_neighborhood"]
-                            noteslist = list(self.memories.values())
-                            notes_id = list(self.memories.keys())
                             
                             for i in range(min(len(indices), len(new_tags_neighborhood))):
                                 # Skip if we don't have enough neighbors
                                 if i >= len(indices):
                                     continue
                                     
+                                # Get memory ID from indices (they are string IDs, not integer indices)
+                                memory_id = indices[i]
+                                if memory_id not in self.memories:
+                                    continue
+                                    
                                 tag = new_tags_neighborhood[i]
                                 if i < len(new_context_neighborhood):
                                     context = new_context_neighborhood[i]
                                 else:
-                                    # Since indices are just numbers now, we need to find the memory
-                                    # In memory list using its index number
-                                    if i < len(noteslist):
-                                        context = noteslist[i].context
-                                    else:
-                                        continue
+                                    context = self.memories[memory_id].context
                                         
-                                # Get index from the indices list
-                                if i < len(indices):
-                                    memorytmp_idx = indices[i]
-                                    # Make sure the index is valid
-                                    if memorytmp_idx < len(noteslist):
-                                        notetmp = noteslist[memorytmp_idx]
-                                        notetmp.tags = tag
-                                        notetmp.context = context
-                                        # Make sure the index is valid
-                                        if memorytmp_idx < len(notes_id):
-                                            self.memories[notes_id[memorytmp_idx]] = notetmp
+                                # Update the memory directly using its ID
+                                memory_to_update = self.memories[memory_id]
+                                memory_to_update.tags = tag
+                                memory_to_update.context = context
                                 
                 return should_evolve, note
                 

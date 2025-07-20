@@ -302,7 +302,7 @@ class TestNewFeatures(unittest.TestCase):
         
         if memory_id1 == memory_id2:
             # If consolidation occurred, verify the consolidated memory contains relevant content
-            self.assertIn("Python", memory1.content.lower())
+            self.assertIn("python", memory1.content.lower())
             self.assertIn("programming", memory1.content.lower())
             # Verify only one memory exists in this case
             self.assertTrue(memory_id2 in self.memory_system.memories)
