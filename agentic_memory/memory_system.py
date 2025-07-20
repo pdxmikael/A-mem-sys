@@ -511,27 +511,15 @@ class AgenticMemorySystem:
                 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for memories using a hybrid retrieval approach."""
-        # DEBUG: Log search attempt
-        print(f"\n=== DEBUG: Search Debug ===")
-        print(f"Query: {query}")
-        print(f"Session ID: {self.session_id}")
-        print(f"Current memories in self.memories: {list(self.memories.keys())}")
-        
         # Get results from ChromaDB (only do this once) - filter by session_id
         search_results = self.retriever.search(query, k, where={"session_id": self.session_id})
-        
-        # DEBUG: Log ChromaDB results
-        print(f"ChromaDB search results: {search_results}")
-        print(f"ChromaDB returned IDs: {search_results.get('ids', [])})")
         
         memories = []
         
         # Process ChromaDB results
         if 'ids' in search_results and search_results['ids'] and len(search_results['ids']) > 0:
-            print(f"Processing {len(search_results['ids'][0])} results from ChromaDB")
             for i, doc_id in enumerate(search_results['ids'][0]):
                 memory = self.memories.get(doc_id)
-                print(f"  Doc ID {doc_id}: Found in self.memories = {memory is not None}")
                 if memory:
                     memories.append({
                         'id': doc_id,
@@ -540,10 +528,6 @@ class AgenticMemorySystem:
                         'keywords': memory.keywords,
                         'score': search_results['distances'][0][i]
                     })
-        else:
-            print("No results returned from ChromaDB")
-        
-        print(f"Final search results count: {len(memories)}")
         return memories[:k]
     
     def _search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
@@ -820,46 +804,36 @@ class AgenticMemorySystem:
                                 self.consolidated_id = target_id
                                 self.consolidated_content = content
                         
-                        # DEBUG: Check memory state before consolidation
-                        print(f"\n=== DEBUG: Consolidation Memory State ===")
-                        print(f"Target memory ID: {consolidate_with_id}")
-                        print(f"Target memory exists in self.memories: {consolidate_with_id in self.memories}")
-                        print(f"Current memory count: {len(self.memories)}")
-                        print(f"Memory IDs: {list(self.memories.keys())}")
-                        
                         # Update the target memory with consolidated content and metadata
                         if consolidate_with_id in self.memories:
                             target_memory = self.memories[consolidate_with_id]
                             target_memory.content = consolidated_content
-                            print(f"Updated target memory content: {target_memory.content[:100]}...")
                             
-                            # Update metadata from LLM response
+                            # Extract metadata from LLM response
                             tags_to_update = response_json.get("tags_to_update", [])
                             new_context_neighborhood = response_json.get("new_context_neighborhood", [])
                             new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
                             
                             # Merge keywords from multiple sources for comprehensive coverage
                             consolidated_keywords = set(target_memory.keywords)  # Start with existing keywords
+                            consolidated_keywords.update(note.keywords)  # Add new memory's keywords
                             if tags_to_update:
                                 consolidated_keywords.update(tags_to_update)  # Add LLM suggestions
                             if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
                                 consolidated_keywords.update(new_tags_neighborhood[0])  # Add comprehensive keyword list
                             target_memory.keywords = list(consolidated_keywords)  # Convert back to list
                             
-                            # Update context from LLM suggestions
+                            # Update context from LLM suggestions or keep existing
                             if new_context_neighborhood and len(new_context_neighborhood) > 0:
                                 target_memory.context = new_context_neighborhood[0]
-                                
-                            # Merge tags from original memory and LLM suggestions
+                            
+                            # Merge tags from original memory, new memory, and LLM suggestions
                             consolidated_tags = set(target_memory.tags)  # Start with existing tags
+                            consolidated_tags.update(note.tags)  # Add new memory's tags (CRUCIAL!)
                             if tags_to_update:
                                 consolidated_tags.update(tags_to_update)  # Add LLM tag suggestions
                             if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
-                                # Add all meaningful tags from new_tags_neighborhood
-                                for tag in new_tags_neighborhood[0]:
-                                    # Include tags that are meaningful descriptors (not basic keywords like "magic" -> "magical")
-                                    if tag in ['ancient', 'knowledge', 'spells', 'fantasy', 'elemental', 'research'] or len(tag) > 4:
-                                        consolidated_tags.add(tag)
+                                consolidated_tags.update(new_tags_neighborhood[0])  # Add all tags from LLM
                             target_memory.tags = list(consolidated_tags)  # Convert back to list
                             
                             # Update retriever with new metadata and add session_id
