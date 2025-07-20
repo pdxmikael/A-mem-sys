@@ -299,14 +299,19 @@ class TestAgenticMemorySystem(unittest.TestCase):
         memory = self.memory_system.read(memory_id)
         
         # Process the memory
-        should_evolve, processed_memory = self.memory_system.process_memory(memory)
+        evo_result, processed_memory = self.memory_system.process_memory(memory)
         
-        # Verify processing results
-        self.assertIsInstance(should_evolve, bool)
+        # Verify processing results - evo_result can be bool or ConsolidationResult
+        self.assertTrue(isinstance(evo_result, bool) or hasattr(evo_result, 'consolidated_id'))
         self.assertIsInstance(processed_memory, MemoryNote)
         self.assertIsNotNone(processed_memory.tags)
         self.assertIsNotNone(processed_memory.context)
         self.assertIsNotNone(processed_memory.keywords)
+        
+        # If consolidation occurred, verify the ConsolidationResult
+        if hasattr(evo_result, 'consolidated_id'):
+            self.assertIsNotNone(evo_result.consolidated_id)
+            self.assertIsNotNone(evo_result.consolidated_content)
 
 if __name__ == '__main__':
     unittest.main()

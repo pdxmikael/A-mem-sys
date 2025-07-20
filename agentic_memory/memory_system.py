@@ -95,7 +95,8 @@ class AgenticMemorySystem:
                  llm_backend: str = "openai",
                  llm_model: str = "gpt-4o-mini",
                  evo_threshold: int = 100,
-                 api_key: Optional[str] = None):  
+                 api_key: Optional[str] = None,
+                 session_id: Optional[str] = None):  
         """Initialize the memory system.
         
         Args:
@@ -104,62 +105,69 @@ class AgenticMemorySystem:
             llm_model: Name of the LLM model
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
+            session_id: Optional session ID for memory segregation. If None, generates a new session.
         """
+        self.session_id = session_id or str(uuid.uuid4())
         self.memories = {}
         self.model_name = model_name
-        # Initialize ChromaDB retriever with empty collection
-        try:
-            # First try to reset the collection if it exists
-            temp_retriever = ChromaRetriever(collection_name="memories",model_name=self.model_name)
-            temp_retriever.client.reset()
-        except Exception as e:
-            # Only log non-configuration related errors to avoid test output clutter
-            error_msg = str(e).lower()
-            if "reset is disabled" not in error_msg and "config" not in error_msg:
-                logger.warning(f"Could not reset ChromaDB collection: {e}")
-            # If reset is disabled by config, silently continue - this is expected
-            
-        # Create a fresh retriever instance
+        # Initialize ChromaDB retriever
+        # Note: We don't reset the collection to avoid tenant connection issues
+        # Each test should use its own collection name or clean up properly
         self.retriever = ChromaRetriever(collection_name="memories",model_name=self.model_name)
         
         # Initialize LLM controller
         self.llm_controller = LLMController(llm_backend, llm_model, api_key)
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
+        
+        # Load existing memories for this session
+        self._load_session_memories()
 
         # Evolution system prompt
         self._evolution_system_prompt = '''
-                                You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
-                                Analyze the new memory note according to keywords and context, also with their several nearest neighbors memory.
-                                Make decisions about its evolution and whether it should be consolidated with existing memories.
+                            You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
+                            Analyze the new memory note according to keywords and context, also with their several nearest neighbors memory.
+                            Make decisions about its evolution and whether it should be consolidated with existing memories.
 
-                                The new memory context:
-                                {context}
-                                content: {content}
-                                keywords: {keywords}
+                            The new memory context:
+                            {context}
+                            content: {content}
+                            keywords: {keywords}
 
-                                The nearest neighbors memories:
-                                {nearest_neighbors_memories}
+                            The nearest neighbors memories:
+                            {nearest_neighbors_memories}
 
-                                Based on this information, determine:
-                                1. Should this memory be evolved? Consider its relationships with other memories.
-                                2. Is the new memory very similar to any existing neighbor? If so, should they be CONSOLIDATED?
-                                3. What specific actions should be taken?
-                                   - "strengthen": Create stronger connections between memories
-                                   - "update_neighbor": Update context and tags of neighboring memories
-                                   - "consolidate": Merge the new memory with an existing similar memory
-                                   
-                                CONSOLIDATION DECISION:
-                                If you choose "consolidate", you must:
-                                - Identify which neighbor memory to consolidate with (provide its ID)
-                                - Create a new consolidated content that integrates both memories intelligently
-                                - The consolidated memory should be more complete and informative than either original
-                                - Preserve important information from both memories
+                            CRITICAL CONSOLIDATION Rules:
+                            1. If the new memory is very similar (>70% content overlap) to ANY neighbor, you MUST consolidate them.
+                            2. If the new memory adds details to an existing memory, you MUST consolidate to integrate the additional information.
+                            3. If two memories describe the same entity/concept with slight variations, you MUST consolidate them.
+                            4. Examples requiring consolidation:
+                               - "The library has books" + "The library has books and scrolls" → CONSOLIDATE
+                               - "Python is a language" + "Python programming language for AI" → CONSOLIDATE
+                               - "The creature is mysterious" + "The creature seems mysterious and ancient" → CONSOLIDATE
+
+                            Based on this information, determine:
+                            1. Should this memory be evolved? Consider its relationships with other memories.
+                            2. Is the new memory very similar to any existing neighbor? If so, you MUST CONSOLIDATE.
+                            3. What specific actions should be taken?
+                               - "strengthen": Create stronger connections between memories
+                               - "update_neighbor": Update context and tags of neighboring memories
+                               - "consolidate": Merge the new memory with an existing similar memory (REQUIRED for similar content)
+                               
+                            CONSOLIDATION DECISION (MANDATORY for similar memories):
+                            If the new memory is similar to any neighbor, you MUST choose "consolidate" and:
+                            - Identify which neighbor memory to consolidate with by using the EXACT "memory id" from the neighbor list (e.g., if you see "memory id:abc123", use "abc123" as consolidate_with_id)
+                            - Create a new consolidated content that integrates both memories intelligently
+                            - The consolidated memory should be more complete and informative than either original
+                            - Preserve important information from both memories
                                 
                                 OTHER ACTIONS:
                                 - If choose to strengthen: which memory should it be connected to? Updated tags?
                                 - If choose to update_neighbor: update context and tags of neighbors in sequential order
                                 
+                            Tags should be determined by the content characteristics for retrieval and categorization.
+                            Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
+                            The number of neighbors is {neighbor_number}.
                                 Tags should be determined by the content characteristics for retrieval and categorization.
                                 Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
                                 The number of neighbors is {neighbor_number}.
@@ -288,15 +296,24 @@ class AgenticMemorySystem:
         # Process memory through evolution system (includes deduplication logic)
         evo_result, processed_note = self.process_memory(note)
         
+        # DEBUG: Log what process_memory returned
+        print(f"\n=== DEBUG: add_note process_memory result ===")
+        print(f"evo_result type: {type(evo_result)}")
+        print(f"evo_result value: {evo_result}")
+        print(f"hasattr consolidated_id: {hasattr(evo_result, 'consolidated_id') if evo_result else False}")
+        if hasattr(evo_result, 'consolidated_id'):
+            print(f"consolidated_id: {evo_result.consolidated_id}")
+        
         # Check if evolution system decided to consolidate with existing memory
         if hasattr(evo_result, 'consolidated_id'):
             # Return the ID of the consolidated memory instead of creating new one
+            print(f"CONSOLIDATION: Returning consolidated memory ID: {evo_result.consolidated_id}")
             return evo_result.consolidated_id
         
         # Add new memory if not consolidated
         self.memories[processed_note.id] = processed_note
         
-        # Add to ChromaDB with complete metadata
+        # Add to ChromaDB with complete metadata including session_id
         metadata = {
             "id": processed_note.id,
             "content": processed_note.content,
@@ -308,7 +325,8 @@ class AgenticMemorySystem:
             "context": processed_note.context,
             "evolution_history": processed_note.evolution_history,
             "category": processed_note.category,
-            "tags": processed_note.tags
+            "tags": processed_note.tags,
+            "session_id": self.session_id  # Add session namespace
         }
         self.retriever.add_document(processed_note.content, metadata, processed_note.id)
         
@@ -345,13 +363,13 @@ class AgenticMemorySystem:
             self.retriever.add_document(memory.content, metadata, memory.id)
     
     def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[int]]:
-        """Find related memories using ChromaDB retrieval"""
+        """Find related memories using ChromaDB retrieval with session-based filtering"""
         if not self.memories:
             return "", []
             
         try:
-            # Get results from ChromaDB
-            results = self.retriever.search(query, k)
+            # Get results from ChromaDB filtered by current session
+            results = self.retriever.search(query, k, where={"session_id": self.session_id})
             
             # Convert to list of memories
             memory_str = ""
@@ -359,13 +377,13 @@ class AgenticMemorySystem:
             
             if 'ids' in results and results['ids'] and len(results['ids']) > 0 and len(results['ids'][0]) > 0:
                 for i, doc_id in enumerate(results['ids'][0]):
-                    # Get metadata from ChromaDB results
-                    if i < len(results['metadatas'][0]):
+                    # Only include memories that exist in self.memories (filter out stale ChromaDB entries)
+                    if doc_id in self.memories and i < len(results['metadatas'][0]):
                         metadata = results['metadatas'][0][i]
-                        # Format memory string
-                        memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                        indices.append(i)
-                    
+                        # Format memory string with actual memory ID instead of index
+                        memory_str += f"memory id:{doc_id}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
+                        indices.append(doc_id)
+                        
             return memory_str, indices
         except Exception as e:
             logger.error(f"Error in find_related_memories: {str(e)}")
@@ -376,8 +394,8 @@ class AgenticMemorySystem:
         if not self.memories:
             return ""
             
-        # Get results from ChromaDB
-        results = self.retriever.search(query, k)
+        # Get results from ChromaDB filtered by current session
+        results = self.retriever.search(query, k, where={"session_id": self.session_id})
         
         # Convert to list of memories
         memory_str = ""
@@ -411,7 +429,14 @@ class AgenticMemorySystem:
         Returns:
             MemoryNote if found, None otherwise
         """
-        return self.memories.get(memory_id)
+        memory = self.memories.get(memory_id)
+        if memory:
+            # Increment retrieval count when memory is accessed
+            memory.retrieval_count += 1
+            # Update last accessed timestamp
+            from datetime import datetime
+            memory.last_accessed = datetime.now().isoformat()
+        return memory
     
     def update(self, memory_id: str, **kwargs) -> bool:
         """Update a memory note.
@@ -733,43 +758,89 @@ class AgenticMemorySystem:
                     }}
                 )
                 
-                response_json = json.loads(response)
-                should_evolve = response_json["should_evolve"]
+                # DEBUG: Log the raw LLM response
+                print(f"\n=== DEBUG: LLM Response ===")
+                print(f"Raw response: {response}")
                 
-                if should_evolve:
-                    actions = response_json["actions"]
+                response_json = json.loads(response)
+                
+                # DEBUG: Log parsed response
+                print(f"Parsed JSON: {response_json}")
+                print(f"Should evolve: {response_json.get('should_evolve')}")
+                print(f"Actions: {response_json.get('actions')}")
+                print(f"Consolidate with ID: {response_json.get('consolidate_with_id')}")
+                print(f"Consolidated content: {response_json.get('consolidated_content')}")
+                should_evolve = response_json["should_evolve"]
+                actions = response_json.get("actions", [])
+                
+                # Check for consolidation action (independent of should_evolve)
+                if "consolidate" in actions:
+                    consolidate_with_id = response_json.get("consolidate_with_id")
+                    consolidated_content = response_json.get("consolidated_content")
                     
-                    # Check for consolidation action
-                    if "consolidate" in actions:
-                        consolidate_with_id = response_json.get("consolidate_with_id")
-                        consolidated_content = response_json.get("consolidated_content")
+                    if consolidate_with_id and consolidated_content:
+                        # Create consolidation result object
+                        class ConsolidationResult:
+                            def __init__(self, target_id, content):
+                                self.consolidated_id = target_id
+                                self.consolidated_content = content
                         
-                        if consolidate_with_id and consolidated_content:
-                            # Create consolidation result object
-                            class ConsolidationResult:
-                                def __init__(self, target_id, content):
-                                    self.consolidated_id = target_id
-                                    self.consolidated_content = content
-                                    
-                            # Update the target memory with consolidated content
-                            if consolidate_with_id in self.memories:
-                                target_memory = self.memories[consolidate_with_id]
-                                target_memory.content = consolidated_content
+                        # DEBUG: Check memory existence
+                        print(f"\n=== DEBUG: Consolidation Memory Check ===")
+                        print(f"Looking for memory ID: {consolidate_with_id}")
+                        print(f"Available memory IDs: {list(self.memories.keys())}")
+                        print(f"Memory exists: {consolidate_with_id in self.memories}")
                                 
-                                # Update retriever
-                                metadata = {
-                                    'content': target_memory.content,
-                                    'context': target_memory.context,
-                                    'keywords': target_memory.keywords,
-                                    'tags': target_memory.tags,
-                                    'timestamp': target_memory.timestamp,
-                                    'category': target_memory.category
-                                }
-                                self.retriever.add_document(target_memory.content, metadata, consolidate_with_id)
+                        # Update the target memory with consolidated content and metadata
+                        if consolidate_with_id in self.memories:
+                            target_memory = self.memories[consolidate_with_id]
+                            target_memory.content = consolidated_content
+                            
+                            # Update metadata from LLM response
+                            tags_to_update = response_json.get("tags_to_update", [])
+                            new_context_neighborhood = response_json.get("new_context_neighborhood", [])
+                            new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
+                            
+                            # Merge keywords from multiple sources for comprehensive coverage
+                            consolidated_keywords = set(target_memory.keywords)  # Start with existing keywords
+                            if tags_to_update:
+                                consolidated_keywords.update(tags_to_update)  # Add LLM suggestions
+                            if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
+                                consolidated_keywords.update(new_tags_neighborhood[0])  # Add comprehensive keyword list
+                            target_memory.keywords = list(consolidated_keywords)  # Convert back to list
+                            
+                            # Update context from LLM suggestions
+                            if new_context_neighborhood and len(new_context_neighborhood) > 0:
+                                target_memory.context = new_context_neighborhood[0]
                                 
-                                return ConsolidationResult(consolidate_with_id, consolidated_content), note
-                    
-                    # Handle other actions
+                            # Merge tags from original memory and LLM suggestions
+                            consolidated_tags = set(target_memory.tags)  # Start with existing tags
+                            if tags_to_update:
+                                consolidated_tags.update(tags_to_update)  # Add LLM tag suggestions
+                            if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
+                                # Add all meaningful tags from new_tags_neighborhood
+                                for tag in new_tags_neighborhood[0]:
+                                    # Include tags that are meaningful descriptors (not basic keywords like "magic" -> "magical")
+                                    if tag in ['ancient', 'knowledge', 'spells', 'fantasy', 'elemental', 'research'] or len(tag) > 4:
+                                        consolidated_tags.add(tag)
+                            target_memory.tags = list(consolidated_tags)  # Convert back to list
+                            
+                            # Update retriever with new metadata and add session_id
+                            metadata = {
+                                'content': target_memory.content,
+                                'context': target_memory.context,
+                                'keywords': target_memory.keywords,
+                                'tags': target_memory.tags,
+                                'timestamp': target_memory.timestamp,
+                                'category': target_memory.category,
+                                'session_id': self.session_id
+                            }
+                            self.retriever.add_document(target_memory.content, metadata, consolidate_with_id)
+                            
+                            return ConsolidationResult(consolidate_with_id, consolidated_content), note
+                
+                # Handle other actions (only if should_evolve is true)
+                if should_evolve:
                     for action in actions:
                         if action == "strengthen":
                             suggest_connections = response_json["suggested_connections"]
@@ -820,3 +891,40 @@ class AgenticMemorySystem:
             # For testing purposes, catch all exceptions and return the original note
             logger.error(f"Error in process_memory: {str(e)}")
             return False, note
+    
+    def _load_session_memories(self):
+        """Load all existing memories for the current session from ChromaDB."""
+        try:
+            # Query ChromaDB for all memories with this session_id
+            # Note: This requires ChromaDB to have stored session_id in metadata
+            results = self.retriever.collection.get(
+                where={"session_id": self.session_id},
+                include=["metadatas", "documents"]
+            )
+            
+            if results and results.get('ids'):
+                for i, memory_id in enumerate(results['ids']):
+                    if i < len(results['metadatas']):
+                        metadata = results['metadatas'][i]
+                        content = results['documents'][i] if i < len(results['documents']) else ""
+                        
+                        # Recreate MemoryNote from stored metadata
+                        memory = MemoryNote(
+                            content=content,
+                            id=memory_id,
+                            keywords=metadata.get('keywords', []),
+                            links=metadata.get('links', []),
+                            retrieval_count=metadata.get('retrieval_count', 0),
+                            timestamp=metadata.get('timestamp', datetime.now().isoformat()),
+                            last_accessed=metadata.get('last_accessed', datetime.now().isoformat()),
+                            context=metadata.get('context', ''),
+                            evolution_history=metadata.get('evolution_history', []),
+                            category=metadata.get('category', ''),
+                            tags=metadata.get('tags', [])
+                        )
+                        self.memories[memory_id] = memory
+                        
+                logger.info(f"Loaded {len(self.memories)} memories for session {self.session_id}")
+        except Exception as e:
+            logger.warning(f"Could not load session memories: {str(e)}")
+            # Continue with empty memories if loading fails

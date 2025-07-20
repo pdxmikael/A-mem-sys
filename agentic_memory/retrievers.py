@@ -29,9 +29,29 @@ class ChromaRetriever:
         os.makedirs(persist_directory, exist_ok=True)
         
         # Initialize ChromaDB with persistent storage
-        self.client = chromadb.PersistentClient(path=persist_directory)
-        # Use ChromaDB's default embedding function instead of SentenceTransformer
-        self.collection = self.client.get_or_create_collection(name=collection_name)
+        try:
+            self.client = chromadb.PersistentClient(path=persist_directory)
+            # Use ChromaDB's default embedding function instead of SentenceTransformer
+            self.collection = self.client.get_or_create_collection(name=collection_name)
+        except Exception as e:
+            # If there's an issue with the persistent client (e.g., corrupted data),
+            # fall back to creating a new client
+            print(f"Warning: Issue with persistent ChromaDB client: {e}")
+            print(f"Recreating ChromaDB client at {persist_directory}")
+            
+            # Remove corrupted data if it exists
+            if os.path.exists(persist_directory):
+                import shutil
+                shutil.rmtree(persist_directory)
+                os.makedirs(persist_directory, exist_ok=True)
+            
+            # Create fresh client and collection
+            self.client = chromadb.PersistentClient(path=persist_directory)
+            self.collection = self.client.get_or_create_collection(name=collection_name)
+        
+        # Store configuration for later use
+        self.collection_name = collection_name
+        self.persist_directory = persist_directory
         
     def add_document(self, document: str, metadata: Dict, doc_id: str):
         """Add a document to ChromaDB.
@@ -65,20 +85,26 @@ class ChromaRetriever:
         """
         self.collection.delete(ids=[doc_id])
         
-    def search(self, query: str, k: int = 5):
+    def search(self, query: str, k: int = 5, where: dict = None):
         """Search for similar documents.
         
         Args:
             query: Query text
             k: Number of results to return
+            where: Optional filter conditions for metadata
             
         Returns:
             Dict with documents, metadatas, ids, and distances
         """
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=k
-        )
+        query_params = {
+            "query_texts": [query],
+            "n_results": k
+        }
+        
+        if where:
+            query_params["where"] = where
+            
+        results = self.collection.query(**query_params)
         
         # Convert string metadata back to original types
         if 'metadatas' in results and results['metadatas'] and len(results['metadatas']) > 0:

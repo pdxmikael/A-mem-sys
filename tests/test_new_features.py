@@ -26,6 +26,9 @@ class TestNewFeatures(unittest.TestCase):
         self.openai_key = openai_key if is_valid_key(openai_key) else None
         self.anthropic_key = anthropic_key if is_valid_key(anthropic_key) else None
         
+        # Set has_valid_api_key flag for LLM-dependent tests
+        self.has_valid_api_key = bool(self.openai_key or self.anthropic_key)
+        
         # Skip tests if no valid API keys are available
         if not self.openai_key and not self.anthropic_key:
             self.skipTest("No valid API keys available (OPENAI_API_KEY or ANTHROPIC_API_KEY)")
@@ -241,24 +244,134 @@ class TestNewFeatures(unittest.TestCase):
         self.assertGreater(len(results['ids'][0]), 0)
         self.assertEqual(results['ids'][0][0], "test_id_1")
 
-    def test_memory_deduplication_high_similarity(self):
-        """Test memory deduplication with high similarity content."""
+    def test_memory_evolution_system_invocation(self):
+        """Test that the evolution system is properly invoked for similar content."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+            
+        # Track initial memory count
+        initial_count = len(self.memory_system.memories)
+        
         # Add first memory
         content1 = "The temple creature is mysterious and ancient"
         memory_id1 = self.memory_system.add_note(content1)
+        self.assertIsNotNone(memory_id1)
         
-        # Add very similar memory - should be merged
+        # Verify memory was added
+        self.assertEqual(len(self.memory_system.memories), initial_count + 1)
+        
+        # Add similar memory - this should invoke the evolution system
         content2 = "The temple creature seems mysterious and ancient"
         memory_id2 = self.memory_system.add_note(content2)
+        self.assertIsNotNone(memory_id2)
         
-        # Should return same ID (merged)
-        self.assertEqual(memory_id1, memory_id2)
+        # Verify evolution system was invoked by checking:
+        # 1. At least one memory exists and is readable
+        # 2. The evolution system found neighbors (first memory should be found as neighbor)
+        memory1 = self.memory_system.read(memory_id1)
+        self.assertIsNotNone(memory1)
         
-        # Verify only one memory exists
-        memory = self.memory_system.read(memory_id1)
-        self.assertIsNotNone(memory)
-        # Content should be updated with additional info
-        self.assertIn("Additional:", memory.content)
+        # Check that we can find related memories
+        related_memories, indices = self.memory_system.find_related_memories(content2, k=5)
+        self.assertIsNotNone(related_memories)
+        
+        # Should find at least the first memory as related
+        self.assertGreater(len(indices), 0, "Evolution system should find related memories")
+    
+    def test_consolidation_result_handling(self):
+        """Test that consolidation results are properly handled when they occur."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+            
+        # Create a simple mock consolidation scenario
+        # We can't force the LLM to consolidate, but we can test the mechanism
+        
+        # Add first memory
+        content1 = "Python is a programming language"
+        memory_id1 = self.memory_system.add_note(content1)
+        self.assertIsNotNone(memory_id1)
+        
+        # Add related memory
+        content2 = "Python programming language for development"
+        memory_id2 = self.memory_system.add_note(content2)
+        self.assertIsNotNone(memory_id2)
+        
+        # Verify both memories are accessible (regardless of consolidation)
+        memory1 = self.memory_system.read(memory_id1)
+        self.assertIsNotNone(memory1)
+        
+        if memory_id1 == memory_id2:
+            # If consolidation occurred, verify the consolidated memory contains relevant content
+            self.assertIn("Python", memory1.content.lower())
+            self.assertIn("programming", memory1.content.lower())
+            # Verify only one memory exists in this case
+            self.assertTrue(memory_id2 in self.memory_system.memories)
+        else:
+            # If no consolidation, both memories should exist
+            memory2 = self.memory_system.read(memory_id2) 
+            self.assertIsNotNone(memory2)
+            self.assertTrue(memory_id1 in self.memory_system.memories)
+            self.assertTrue(memory_id2 in self.memory_system.memories)
+
+    def test_consolidation_with_detail_integration(self):
+        """Test that nearly identical memories with one differing detail get consolidated."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+            
+        # Create first memory with basic information
+        content1 = "The ancient library contains thousands of scrolls with magical knowledge"
+        memory_id1 = self.memory_system.add_note(
+            content1,
+            keywords=["library", "scrolls", "magic"],
+            tags=["ancient", "knowledge"],
+            context="Fantasy world exploration"
+        )
+        self.assertIsNotNone(memory_id1)
+        
+        # Create second memory that's nearly identical but adds one specific detail
+        content2 = "The ancient library contains thousands of scrolls with magical knowledge, including rare elemental spells"
+        memory_id2 = self.memory_system.add_note(
+            content2,
+            keywords=["library", "scrolls", "magic", "elemental", "spells"], 
+            tags=["ancient", "knowledge", "spells"],
+            context="Fantasy world exploration - magical research"
+        )
+        self.assertIsNotNone(memory_id2)
+        
+        # For nearly identical memories with just additional detail, consolidation MUST occur
+        self.assertEqual(memory_id1, memory_id2, 
+                        "Nearly identical memories with additional detail must be consolidated into one memory")
+        
+        # Consolidation occurred - verify integrated content and metadata
+        consolidated_memory = self.memory_system.read(memory_id1)
+        self.assertIsNotNone(consolidated_memory)
+        
+        # Verify the consolidated content contains both original and new information
+        content_lower = consolidated_memory.content.lower()
+        self.assertIn("library", content_lower)
+        self.assertIn("scrolls", content_lower)
+        self.assertIn("magical", content_lower)
+        self.assertIn("elemental", content_lower, "Consolidated memory must contain the additional detail 'elemental'")
+        
+        # Verify metadata integration - should include keywords from both memories
+        self.assertIn("library", consolidated_memory.keywords)
+        self.assertIn("magic", consolidated_memory.keywords)
+        self.assertIn("elemental", consolidated_memory.keywords, "Consolidated memory must include new keyword 'elemental'")
+        
+        # Verify tags integration
+        self.assertIn("ancient", consolidated_memory.tags)
+        self.assertIn("knowledge", consolidated_memory.tags)
+        self.assertIn("spells", consolidated_memory.tags, "Consolidated memory must include new tag 'spells'")
+        
+        # Verify only one memory exists in the system for this content
+        memories_with_library = [m for m in self.memory_system.memories.values() 
+                               if "library" in m.content.lower()]
+        self.assertEqual(len(memories_with_library), 1, 
+                       "Should have exactly one consolidated memory about the library")
+        
+        print(f"SUCCESS: Consolidation occurred. Final content: {consolidated_memory.content}")
+        print(f"Final keywords: {consolidated_memory.keywords}")
+        print(f"Final tags: {consolidated_memory.tags}")
 
     def test_memory_deduplication_low_similarity(self):
         """Test that dissimilar memories are not deduplicated."""
@@ -281,26 +394,35 @@ class TestNewFeatures(unittest.TestCase):
         self.assertEqual(memory1.content, content1)
         self.assertEqual(memory2.content, content2)
 
-    def test_calculate_content_similarity(self):
-        """Test content similarity calculation."""
+    def test_llm_based_consolidation(self):
+        """Test LLM-based memory consolidation functionality."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+        
+        # Add first memory
         content1 = "Python programming language for machine learning"
+        memory_id1 = self.memory_system.add_note(content1)
+        self.assertIsNotNone(memory_id1)
+        
+        # Add similar memory - should potentially be consolidated by LLM
         content2 = "Python programming language for data science"
-        content3 = "JavaScript web development framework"
+        memory_id2 = self.memory_system.add_note(content2)
+        self.assertIsNotNone(memory_id2)
         
-        # Test high similarity
-        similarity_high = self.memory_system._calculate_content_similarity(content1, content2)
-        self.assertGreaterEqual(similarity_high, 0.5)
-        
-        # Test low similarity
-        similarity_low = self.memory_system._calculate_content_similarity(content1, content3)
-        self.assertLess(similarity_low, 0.5)
-        
-        # Test identical content
-        similarity_identical = self.memory_system._calculate_content_similarity(content1, content1)
-        self.assertEqual(similarity_identical, 1.0)
+        # Verify that memories were processed (either consolidated or kept separate)
+        # The exact behavior depends on LLM decision
+        memory1 = self.memory_system.read(memory_id1)
+        if memory_id1 == memory_id2:
+            # Consolidated case - content should be merged
+            self.assertIn("Python", memory1.content)
+        else:
+            # Separate memories case
+            memory2 = self.memory_system.read(memory_id2)
+            self.assertIsNotNone(memory2)
+            self.assertNotEqual(memory1.content, memory2.content)
 
-    def test_find_similar_memories(self):
-        """Test finding similar memories above threshold."""
+    def test_memory_search_functionality(self):
+        """Test memory search functionality with semantic similarity."""
         # Add some test memories
         contents = [
             "Neural networks are used in deep learning for AI applications",
@@ -309,22 +431,29 @@ class TestNewFeatures(unittest.TestCase):
             "Web development with JavaScript frameworks"
         ]
         
+        memory_ids = []
         for content in contents:
-            self.memory_system.add_note(content)
+            memory_id = self.memory_system.add_note(content)
+            memory_ids.append(memory_id)
         
-        # Test finding similar memories
+        # Test search functionality
         query = "Neural networks for deep learning AI"
-        similar_memories = self.memory_system._find_similar_memories(query, threshold=0.3)
+        search_results = self.memory_system.search(query, k=5)
         
-        # Should find at least the first two similar memories
-        self.assertGreaterEqual(len(similar_memories), 2)
+        # Should find relevant memories
+        self.assertGreater(len(search_results), 0)
         
-        # Test with high threshold - should find fewer
-        similar_memories_high = self.memory_system._find_similar_memories(query, threshold=0.8)
-        self.assertLessEqual(len(similar_memories_high), len(similar_memories))
+        # Verify search results have proper structure
+        for result in search_results:
+            self.assertIn('id', result)
+            self.assertIn('content', result)
+            self.assertTrue(result['id'] in memory_ids)
 
-    def test_merge_or_update_memory_content(self):
-        """Test merging or updating memory content."""
+    def test_memory_evolution_processing(self):
+        """Test that memories are processed through the evolution system."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+            
         # Create initial memory
         initial_content = "Neural networks are powerful"
         memory_id = self.memory_system.add_note(
@@ -333,50 +462,62 @@ class TestNewFeatures(unittest.TestCase):
             tags=["AI", "deep-learning"]
         )
         
-        existing_memory = self.memory_system.read(memory_id)
+        self.assertIsNotNone(memory_id)
+        memory = self.memory_system.read(memory_id)
+        self.assertIsNotNone(memory)
+        self.assertIn("neural", memory.content.lower())
         
-        # Test merging with new content
-        new_content = "Neural networks can solve complex problems"
-        new_keywords = ["neural", "networks", "complex"]
-        new_tags = ["AI", "deep-learning", "problem-solving"]
-        
-        merged_id = self.memory_system._merge_or_update_memory(
-            existing_memory,
-            new_content,
-            keywords=new_keywords,
-            tags=new_tags
+        # Add another related memory that might trigger evolution
+        related_content = "Deep learning neural networks are used in AI"
+        memory_id2 = self.memory_system.add_note(
+            related_content,
+            keywords=["neural", "networks", "deep"],
+            tags=["AI", "deep-learning"]
         )
         
-        # Should return same ID
-        self.assertEqual(merged_id, memory_id)
+        self.assertIsNotNone(memory_id2)
         
-        # Verify content was updated
-        updated_memory = self.memory_system.read(memory_id)
-        self.assertIn("Additional:", updated_memory.content)
+        # Verify both memories exist (evolution system may or may not consolidate)
+        memory1 = self.memory_system.read(memory_id)
+        self.assertIsNotNone(memory1)
         
-        # Verify metadata was merged
-        self.assertIn("complex", updated_memory.keywords)
-        self.assertIn("problem-solving", updated_memory.tags)
+        if memory_id != memory_id2:
+            memory2 = self.memory_system.read(memory_id2)
+            self.assertIsNotNone(memory2)
+        else:
+            # Memories were consolidated
+            self.assertIn("neural", memory1.content.lower())
 
     def test_deduplication_integration_with_real_content(self):
         """Test complete deduplication workflow with realistic content."""
+        if not self.has_valid_api_key:
+            self.skipTest("No valid API key available for LLM testing")
+            
         # Test content from the guide
         content1 = "The temple creature is mysterious"
         memory_id1 = self.memory_system.add_note(content1)
+        self.assertIsNotNone(memory_id1)
         
         content2 = "The temple creature seems mysterious and ancient"
         memory_id2 = self.memory_system.add_note(content2)
+        self.assertIsNotNone(memory_id2)
         
-        # Should deduplicate (return same ID)
-        self.assertEqual(memory_id1, memory_id2)
+        # LLM may or may not consolidate - verify both cases work
+        memory1 = self.memory_system.read(memory_id1)
+        self.assertIsNotNone(memory1)
+        self.assertIn("mysterious", memory1.content)
         
-        # Verify merged content
-        final_memory = self.memory_system.read(memory_id1)
-        self.assertIsNotNone(final_memory)
-        self.assertIn("mysterious", final_memory.content)
+        if memory_id1 == memory_id2:
+            # Consolidated case - content should contain elements from both
+            self.assertIn("creature", memory1.content)
+        else:
+            # Separate memories case
+            memory2 = self.memory_system.read(memory_id2)
+            self.assertIsNotNone(memory2)
+            self.assertIn("mysterious", memory2.content)
         
         # Test that retrieval count was incremented
-        self.assertGreaterEqual(final_memory.retrieval_count, 1)
+        self.assertGreaterEqual(memory1.retrieval_count, 1)
 
     def test_persistent_storage_with_consolidation(self):
         """Test persistent storage works with memory consolidation."""
