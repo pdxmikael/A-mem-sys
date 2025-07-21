@@ -907,10 +907,29 @@ class AgenticMemorySystem:
             if results and results.get('ids'):
                 for i, memory_id in enumerate(results['ids']):
                     if i < len(results['metadatas']):
-                        metadata = results['metadatas'][i]
+                        raw_metadata = results['metadatas'][i]
                         content = results['documents'][i] if i < len(results['documents']) else ""
                         
-                        # Recreate MemoryNote from stored metadata
+                        # Deserialize metadata - same logic as ChromaRetriever.search()
+                        metadata = {}
+                        for key, value in raw_metadata.items():
+                            try:
+                                # Try to parse JSON for lists and dicts
+                                if isinstance(value, str) and (value.startswith('[') or value.startswith('{')):
+                                    metadata[key] = json.loads(value)
+                                # Convert numeric strings back to numbers
+                                elif isinstance(value, str) and value.replace('.', '', 1).isdigit():
+                                    if '.' in value:
+                                        metadata[key] = float(value)
+                                    else:
+                                        metadata[key] = int(value)
+                                else:
+                                    metadata[key] = value
+                            except (json.JSONDecodeError, ValueError):
+                                # If parsing fails, keep the original string
+                                metadata[key] = value
+                        
+                        # Recreate MemoryNote from properly deserialized metadata
                         memory = MemoryNote(
                             content=content,
                             id=memory_id,
