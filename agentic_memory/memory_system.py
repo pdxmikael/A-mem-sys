@@ -96,7 +96,8 @@ class AgenticMemorySystem:
                  llm_model: str = "gpt-4o-mini",
                  evo_threshold: int = 100,
                  api_key: Optional[str] = None,
-                 session_id: Optional[str] = None):  
+                 session_id: Optional[str] = None,
+                 status_callback = None):  
         """Initialize the memory system.
         
         Args:
@@ -106,10 +107,13 @@ class AgenticMemorySystem:
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
             session_id: Optional session ID for memory segregation. If None, generates a new session.
+            status_callback: Optional callback function for status updates during memory operations.
+                            Signature: status_callback(message: str, duration: float = 2.0, style: str = "dim cyan")
         """
         self.session_id = session_id or str(uuid.uuid4())
         self.memories = {}
         self.model_name = model_name
+        self.status_callback = status_callback
         # Initialize ChromaDB retriever
         # Note: We don't reset the collection to avoid tenant connection issues
         # Each test should use its own collection name or clean up properly
@@ -291,12 +295,18 @@ class AgenticMemorySystem:
 
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
         """Add a new memory note with evolution-based processing"""
+        # Notify start of memory creation
+        if self.status_callback:
+            self.status_callback("Creating new memory...", 2.0, "dim yellow")
+            
         # Create MemoryNote 
         if time is not None:
             kwargs['timestamp'] = time
         note = MemoryNote(content=content, **kwargs)
         
         # Process memory through evolution system (includes deduplication logic)
+        if self.status_callback:
+            self.status_callback("Processing memory evolution...", 2.5, "dim cyan")
         evo_result, processed_note = self.process_memory(note)
         
         # Check process_memory result for consolidation
@@ -304,10 +314,13 @@ class AgenticMemorySystem:
         # Check if evolution system decided to consolidate with existing memory
         if hasattr(evo_result, 'consolidated_id'):
             # Return the ID of the consolidated memory instead of creating new one
-            # Returning consolidated memory ID
+            if self.status_callback:
+                self.status_callback("Memory consolidated with existing entry", 2.0, "dim green")
             return evo_result.consolidated_id
         
         # Add new memory if not consolidated
+        if self.status_callback:
+            self.status_callback("Adding memory to storage...", 2.0, "dim cyan")
         self.memories[processed_note.id] = processed_note
         
         # Add to ChromaDB with complete metadata including session_id
@@ -330,11 +343,20 @@ class AgenticMemorySystem:
         if evo_result == True:
             self.evo_cnt += 1
             if self.evo_cnt % self.evo_threshold == 0:
+                if self.status_callback:
+                    self.status_callback("Triggering memory consolidation...", 3.0, "dim yellow")
                 self.consolidate_memories()
+        
+        # Final completion message
+        if self.status_callback:
+            self.status_callback("Memory created successfully", 2.0, "green")
         return processed_note.id
     
     def consolidate_memories(self):
         """Consolidate memories: update retriever with new documents"""
+        if self.status_callback:
+            self.status_callback("Consolidating related memories...", 3.0, "dim yellow")
+            
         # Get current retriever configuration to preserve settings
         current_collection_name = getattr(self.retriever, 'collection_name', "memories")
         current_persist_dir = getattr(self.retriever, 'persist_directory', "./memory_db")
@@ -343,6 +365,10 @@ class AgenticMemorySystem:
         self.retriever = ChromaRetriever(collection_name=current_collection_name, model_name=self.model_name, persist_directory=current_persist_dir)
         
         # Re-add all memory documents with their complete metadata
+        memory_count = len(self.memories)
+        if self.status_callback:
+            self.status_callback(f"Rebuilding memory index for {memory_count} memories...", 2.0, "dim cyan")
+            
         for memory in self.memories.values():
             metadata = {
                 "id": memory.id,
@@ -359,6 +385,10 @@ class AgenticMemorySystem:
                 "session_id": self.session_id  # Include session namespace for filtering
             }
             self.retriever.add_document(memory.content, metadata, memory.id)
+        
+        # Consolidation completion
+        if self.status_callback:
+            self.status_callback(f"Consolidated {memory_count} memories", 2.0, "green")
     
     def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[int]]:
         """Find related memories using ChromaDB retrieval with session-based filtering"""
@@ -695,6 +725,8 @@ class AgenticMemorySystem:
             
         try:
             # Get nearest neighbors
+            if self.status_callback:
+                self.status_callback("Analyzing memory relationships...", 2.0, "dim cyan")
             neighbors_text, indices = self.find_related_memories(note.content, k=5)
             if not neighbors_text or not indices:
                 return False, note
@@ -721,6 +753,9 @@ class AgenticMemorySystem:
                 similarity_scores = ["Similarity computation unavailable"]
                 
             # Query LLM for evolution decision
+            if self.status_callback:
+                self.status_callback("Analyzing memory evolution needs...", 3.0, "dim yellow")
+                
             prompt = self._evolution_system_prompt.format(
                 content=note.content,
                 context=note.context,
@@ -792,6 +827,11 @@ class AgenticMemorySystem:
                 response_json = json.loads(response)
                 should_evolve = response_json["should_evolve"]
                 actions = response_json.get("actions", [])
+                
+                # Report discovered actions
+                if self.status_callback and actions:
+                    action_text = ", ".join(actions)
+                    self.status_callback(f"Executing: {action_text}", 2.0, "dim cyan")
                 
                 # Check for consolidation action (independent of should_evolve)
                 if "consolidate" in actions:
@@ -888,11 +928,15 @@ class AgenticMemorySystem:
                 
             except (json.JSONDecodeError, KeyError, Exception) as e:
                 logger.error(f"Error in memory evolution: {str(e)}")
+                if self.status_callback:
+                    self.status_callback("Memory evolution analysis failed", 2.0, "red")
                 return False, note
                 
         except Exception as e:
             # For testing purposes, catch all exceptions and return the original note
             logger.error(f"Error in process_memory: {str(e)}")
+            if self.status_callback:
+                self.status_callback("Memory processing failed", 2.0, "red")
             return False, note
     
     def _load_session_memories(self):
