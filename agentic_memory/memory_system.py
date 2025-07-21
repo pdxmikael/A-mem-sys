@@ -286,7 +286,7 @@ class AgenticMemorySystem:
             clean_response = self._extract_json_from_response(response)
             return json.loads(clean_response)
         except Exception as e:
-            print(f"Error analyzing content: {e}")
+            # Error analyzing content, returning defaults
             return {"keywords": [], "context": "General", "tags": []}
 
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
@@ -299,18 +299,12 @@ class AgenticMemorySystem:
         # Process memory through evolution system (includes deduplication logic)
         evo_result, processed_note = self.process_memory(note)
         
-        # DEBUG: Log what process_memory returned
-        print(f"\n=== DEBUG: add_note process_memory result ===")
-        print(f"evo_result type: {type(evo_result)}")
-        print(f"evo_result value: {evo_result}")
-        print(f"hasattr consolidated_id: {hasattr(evo_result, 'consolidated_id') if evo_result else False}")
-        if hasattr(evo_result, 'consolidated_id'):
-            print(f"consolidated_id: {evo_result.consolidated_id}")
+        # Check process_memory result for consolidation
         
         # Check if evolution system decided to consolidate with existing memory
         if hasattr(evo_result, 'consolidated_id'):
             # Return the ID of the consolidated memory instead of creating new one
-            print(f"CONSOLIDATION: Returning consolidated memory ID: {evo_result.consolidated_id}")
+            # Returning consolidated memory ID
             return evo_result.consolidated_id
         
         # Add new memory if not consolidated
@@ -795,18 +789,7 @@ class AgenticMemorySystem:
                     }}
                 )
                 
-                # DEBUG: Log the raw LLM response
-                print(f"\n=== DEBUG: LLM Response ===")
-                print(f"Raw response: {response}")
-                
                 response_json = json.loads(response)
-                
-                # DEBUG: Log parsed response
-                print(f"Parsed JSON: {response_json}")
-                print(f"Should evolve: {response_json.get('should_evolve')}")
-                print(f"Actions: {response_json.get('actions')}")
-                print(f"Consolidate with ID: {response_json.get('consolidate_with_id')}")
-                print(f"Consolidated content: {response_json.get('consolidated_content')}")
                 should_evolve = response_json["should_evolve"]
                 actions = response_json.get("actions", [])
                 

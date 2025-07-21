@@ -36,8 +36,7 @@ class ChromaRetriever:
         except Exception as e:
             # If there's an issue with the persistent client (e.g., corrupted data),
             # fall back to creating a new client
-            print(f"Warning: Issue with persistent ChromaDB client: {e}")
-            print(f"Recreating ChromaDB client at {persist_directory}")
+            # Issue with persistent ChromaDB client, recreating client
             
             # Remove corrupted data if it exists
             if os.path.exists(persist_directory):
