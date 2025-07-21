@@ -142,7 +142,14 @@ class AgenticMemorySystem:
 
                             Semantic similarity scores between new memory and each neighbor:
                             {similarity_scores}
-                            (Scores range from 0.0 to 1.0, where >0.7 indicates high similarity suitable for consolidation)
+                            (Scores range from 0.0 to 1.0)
+
+                            CONSOLIDATION RULES:
+                            - Strongly consider consolidation if similarity score > 0.8
+                            - Weakly consider consolidation if similarity score > 0.6
+                            - Do not consolidate if similarity score < 0.6
+                            - Consolidate only if memories are on the same topic and one memory is mostly a subset of the other
+                            - When in doubt, DO NOT consolidate
 
                             Based on this information, determine:
                             1. Should this memory be evolved? Consider its relationships with other memories.
@@ -354,7 +361,8 @@ class AgenticMemorySystem:
                 "context": memory.context,
                 "evolution_history": memory.evolution_history,
                 "category": memory.category,
-                "tags": memory.tags
+                "tags": memory.tags,
+                "session_id": self.session_id  # Include session namespace for filtering
             }
             self.retriever.add_document(memory.content, metadata, memory.id)
     
@@ -466,7 +474,8 @@ class AgenticMemorySystem:
             "context": note.context,
             "evolution_history": note.evolution_history,
             "category": note.category,
-            "tags": note.tags
+            "tags": note.tags,
+            "session_id": self.session_id  # Add session namespace
         }
         
         # Delete and re-add to update
@@ -588,13 +597,18 @@ class AgenticMemorySystem:
         return memories[:k]
 
     def search_agentic(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for memories using ChromaDB retrieval."""
+        """Search for memories using ChromaDB retrieval with session-based filtering."""
         if not self.memories:
             return []
             
         try:
-            # Get results from ChromaDB
-            results = self.retriever.search(query, k)
+            # Build where clause for session filtering
+            where_clause = None
+            if self.session_id:
+                where_clause = {"session_id": self.session_id}
+            
+            # Get results from ChromaDB with session filtering
+            results = self.retriever.search(query, k, where=where_clause)
             
             # Process results
             memories = []
@@ -628,6 +642,10 @@ class AgenticMemorySystem:
                     # Add score if available
                     if 'distances' in results and len(results['distances']) > 0 and i < len(results['distances'][0]):
                         memory_dict['score'] = results['distances'][0][i]
+                    
+                    # Prioritize exact matches by adjusting score
+                    if memory_dict['content'].strip().lower() == query.strip().lower():
+                        memory_dict['score'] = -1.0  # Best possible score for exact matches
                         
                     memories.append(memory_dict)
                     seen_ids.add(doc_id)

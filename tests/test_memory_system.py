@@ -237,11 +237,11 @@ class TestAgenticMemorySystem(unittest.TestCase):
         
     def test_memory_consolidation(self):
         """Test memory consolidation with ChromaDB."""
-        # Create multiple memories
+        # Create multiple memories with realistic, semantically distinct content
         contents = [
-            "Memory 1",
-            "Memory 2",
-            "Memory 3"
+            "Python is a high-level programming language known for its simplicity and readability.",
+            "Machine learning algorithms can identify patterns in large datasets automatically.",
+            "Database optimization involves indexing, query tuning, and schema design considerations."
         ]
         
         for content in contents:
