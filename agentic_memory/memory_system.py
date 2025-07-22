@@ -113,6 +113,7 @@ class AgenticMemorySystem:
         self.session_id = session_id or str(uuid.uuid4())
         self.memories = {}
         self.model_name = model_name
+        self.llm_backend = llm_backend  # Store llm_backend for schema generation
         self.status_callback = status_callback
         # Initialize ChromaDB retriever
         # Note: We don't reset the collection to avoid tenant connection issues
@@ -448,6 +449,195 @@ class AgenticMemorySystem:
                             
         return memory_str
 
+    def _get_evolution_schema(self) -> dict:
+        """Generate evolution schema based on LLM backend capabilities.
+        
+        Returns:
+            dict: JSON schema configuration appropriate for the current backend
+        """
+        base_properties = {
+            "should_evolve": {"type": "boolean"},
+            "actions": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "suggested_connections": {
+                "type": "array", 
+                "items": {"type": "string"}
+            },
+            "new_context_neighborhood": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "tags_to_update": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "new_tags_neighborhood": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                }
+            }
+        }
+        
+        # Add consolidation properties
+        base_properties.update({
+            "consolidate_with_id": {"type": ["string", "null"]},
+            "consolidated_content": {"type": ["string", "null"]}
+        })
+        
+        base_required = ["should_evolve", "actions", "suggested_connections", 
+                        "tags_to_update", "new_context_neighborhood", "new_tags_neighborhood"]
+        
+        # OpenAI strict mode requires ALL properties in required array
+        if self.llm_backend == "openai":
+            base_required.extend(["consolidate_with_id", "consolidated_content"])
+            schema_config = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "response",
+                    "schema": {
+                        "type": "object",
+                        "properties": base_properties,
+                        "required": base_required,
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            }
+        else:  # Anthropic or other backends
+            schema_config = {
+                "type": "json_schema", 
+                "json_schema": {
+                    "name": "response",
+                    "schema": {
+                        "type": "object",
+                        "properties": base_properties,
+                        "required": base_required,
+                        "additionalProperties": False
+                    }
+                }
+            }
+        
+        return schema_config
+
+    def _process_evolution_response(self, response_json: dict, note: MemoryNote) -> tuple:
+        """Process evolution response in a backend-agnostic way.
+        
+        Args:
+            response_json: Parsed JSON response from LLM
+            note: Original memory note
+            
+        Returns:
+            tuple: (should_evolve, processed_note)
+        """
+        should_evolve = response_json.get("should_evolve", False)
+        actions = response_json.get("actions", [])
+        
+        # Report discovered actions
+        if self.status_callback and actions:
+            action_text = ", ".join(actions)
+            self.status_callback(f"Executing: {action_text}", 2.0, "dim cyan")
+        
+        # Handle consolidation logic
+        if "consolidate" in actions:
+            consolidate_with_id = response_json.get("consolidate_with_id")
+            consolidated_content = response_json.get("consolidated_content")
+            
+            # Validate consolidation data regardless of backend
+            if consolidate_with_id and consolidated_content:
+                # Create consolidation result object
+                class ConsolidationResult:
+                    def __init__(self, target_id, content):
+                        self.consolidated_id = target_id
+                        self.consolidated_content = content
+                
+                # Update the target memory with consolidated content and metadata
+                if consolidate_with_id in self.memories:
+                    target_memory = self.memories[consolidate_with_id]
+                    target_memory.content = consolidated_content
+                    
+                    # Extract metadata from LLM response
+                    tags_to_update = response_json.get("tags_to_update", [])
+                    new_context_neighborhood = response_json.get("new_context_neighborhood", [])
+                    new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
+                    
+                    # Merge keywords from multiple sources for comprehensive coverage
+                    consolidated_keywords = set(target_memory.keywords)  # Start with existing keywords
+                    consolidated_keywords.update(note.keywords)  # Add new memory's keywords
+                    if tags_to_update:
+                        consolidated_keywords.update(tags_to_update)  # Add LLM suggestions
+                    if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
+                        consolidated_keywords.update(new_tags_neighborhood[0])  # Add comprehensive keyword list
+                    target_memory.keywords = list(consolidated_keywords)  # Convert back to list
+                    
+                    # Update context from LLM suggestions or keep existing
+                    if new_context_neighborhood and len(new_context_neighborhood) > 0:
+                        target_memory.context = new_context_neighborhood[0]
+                    
+                    # Merge tags from original memory, new memory, and LLM suggestions
+                    consolidated_tags = set(target_memory.tags)  # Start with existing tags
+                    consolidated_tags.update(note.tags)  # Add new memory's tags (CRUCIAL!)
+                    if tags_to_update:
+                        consolidated_tags.update(tags_to_update)  # Add LLM tag suggestions
+                    if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
+                        consolidated_tags.update(new_tags_neighborhood[0])  # Add all tags from LLM
+                    target_memory.tags = list(consolidated_tags)  # Convert back to list
+                    
+                    # Update retriever with new metadata and add session_id
+                    metadata = {
+                        'content': target_memory.content,
+                        'context': target_memory.context,
+                        'keywords': target_memory.keywords,
+                        'tags': target_memory.tags,
+                        'timestamp': target_memory.timestamp,
+                        'category': target_memory.category,
+                        'session_id': self.session_id
+                    }
+                    self.retriever.add_document(target_memory.content, metadata, consolidate_with_id)
+                    
+                    return ConsolidationResult(consolidate_with_id, consolidated_content), note
+        
+        # Handle other evolution actions (only if should_evolve is true)
+        if should_evolve:
+            for action in actions:
+                if action == "strengthen":
+                    suggest_connections = response_json.get("suggested_connections", [])
+                    new_tags = response_json.get("tags_to_update", [])
+                    note.links.extend(suggest_connections)
+                    note.tags = new_tags
+                elif action == "update_neighbor":
+                    new_context_neighborhood = response_json.get("new_context_neighborhood", [])
+                    new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
+                    
+                    # Get indices from the last find_related_memories call
+                    neighbors_text, indices = self.find_related_memories(note.content, k=5)
+                    
+                    for i in range(min(len(indices), len(new_tags_neighborhood))):
+                        # Skip if we don't have enough neighbors
+                        if i >= len(indices):
+                            continue
+                            
+                        # Get memory ID from indices (they are string IDs, not integer indices)
+                        memory_id = indices[i]
+                        if memory_id not in self.memories:
+                            continue
+                            
+                        tag = new_tags_neighborhood[i]
+                        if i < len(new_context_neighborhood):
+                            context = new_context_neighborhood[i]
+                        else:
+                            context = self.memories[memory_id].context
+                                
+                        # Update the memory directly using its ID
+                        memory_to_update = self.memories[memory_id]
+                        memory_to_update.tags = tag
+                        memory_to_update.context = context
+        
+        return should_evolve, note
+
     def read(self, memory_id: str) -> Optional[MemoryNote]:
         """Retrieve a memory note by its ID.
         
@@ -764,167 +954,18 @@ class AgenticMemorySystem:
                 neighbor_number=len(indices),
                 similarity_scores="\n".join(similarity_scores)
             )
-            
+
             try:
+                schema_config = self._get_evolution_schema()
                 response = self.llm_controller.llm.get_completion(
                     prompt,
-                    response_format={"type": "json_schema", "json_schema": {
-                        "name": "response",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "should_evolve": {
-                                    "type": "boolean"
-                                },
-                                "actions": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
-                                },
-                                "consolidate_with_id": {
-                                    "type": ["string", "null"]
-                                },
-                                "consolidated_content": {
-                                    "type": ["string", "null"]
-                                },
-                                "suggested_connections": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
-                                },
-                                "new_context_neighborhood": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
-                                },
-                                "tags_to_update": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
-                                },
-                                "new_tags_neighborhood": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        }
-                                    }
-                                }
-                            },
-                            "required": ["should_evolve", "actions", "suggested_connections", 
-                                      "tags_to_update", "new_context_neighborhood", "new_tags_neighborhood"],
-                            "additionalProperties": False
-                        },
-                        "strict": True
-                    }}
+                    response_format=schema_config
                 )
                 
                 response_json = json.loads(response)
-                should_evolve = response_json["should_evolve"]
-                actions = response_json.get("actions", [])
                 
-                # Report discovered actions
-                if self.status_callback and actions:
-                    action_text = ", ".join(actions)
-                    self.status_callback(f"Executing: {action_text}", 2.0, "dim cyan")
-                
-                # Check for consolidation action (independent of should_evolve)
-                if "consolidate" in actions:
-                    consolidate_with_id = response_json.get("consolidate_with_id")
-                    consolidated_content = response_json.get("consolidated_content")
-                    
-                    if consolidate_with_id and consolidated_content:
-                        # Create consolidation result object
-                        class ConsolidationResult:
-                            def __init__(self, target_id, content):
-                                self.consolidated_id = target_id
-                                self.consolidated_content = content
-                        
-                        # Update the target memory with consolidated content and metadata
-                        if consolidate_with_id in self.memories:
-                            target_memory = self.memories[consolidate_with_id]
-                            target_memory.content = consolidated_content
-                            
-                            # Extract metadata from LLM response
-                            tags_to_update = response_json.get("tags_to_update", [])
-                            new_context_neighborhood = response_json.get("new_context_neighborhood", [])
-                            new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
-                            
-                            # Merge keywords from multiple sources for comprehensive coverage
-                            consolidated_keywords = set(target_memory.keywords)  # Start with existing keywords
-                            consolidated_keywords.update(note.keywords)  # Add new memory's keywords
-                            if tags_to_update:
-                                consolidated_keywords.update(tags_to_update)  # Add LLM suggestions
-                            if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
-                                consolidated_keywords.update(new_tags_neighborhood[0])  # Add comprehensive keyword list
-                            target_memory.keywords = list(consolidated_keywords)  # Convert back to list
-                            
-                            # Update context from LLM suggestions or keep existing
-                            if new_context_neighborhood and len(new_context_neighborhood) > 0:
-                                target_memory.context = new_context_neighborhood[0]
-                            
-                            # Merge tags from original memory, new memory, and LLM suggestions
-                            consolidated_tags = set(target_memory.tags)  # Start with existing tags
-                            consolidated_tags.update(note.tags)  # Add new memory's tags (CRUCIAL!)
-                            if tags_to_update:
-                                consolidated_tags.update(tags_to_update)  # Add LLM tag suggestions
-                            if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
-                                consolidated_tags.update(new_tags_neighborhood[0])  # Add all tags from LLM
-                            target_memory.tags = list(consolidated_tags)  # Convert back to list
-                            
-                            # Update retriever with new metadata and add session_id
-                            metadata = {
-                                'content': target_memory.content,
-                                'context': target_memory.context,
-                                'keywords': target_memory.keywords,
-                                'tags': target_memory.tags,
-                                'timestamp': target_memory.timestamp,
-                                'category': target_memory.category,
-                                'session_id': self.session_id
-                            }
-                            self.retriever.add_document(target_memory.content, metadata, consolidate_with_id)
-                            
-                            return ConsolidationResult(consolidate_with_id, consolidated_content), note
-                
-                # Handle other actions (only if should_evolve is true)
-                if should_evolve:
-                    for action in actions:
-                        if action == "strengthen":
-                            suggest_connections = response_json["suggested_connections"]
-                            new_tags = response_json["tags_to_update"]
-                            note.links.extend(suggest_connections)
-                            note.tags = new_tags
-                        elif action == "update_neighbor":
-                            new_context_neighborhood = response_json["new_context_neighborhood"]
-                            new_tags_neighborhood = response_json["new_tags_neighborhood"]
-                            
-                            for i in range(min(len(indices), len(new_tags_neighborhood))):
-                                # Skip if we don't have enough neighbors
-                                if i >= len(indices):
-                                    continue
-                                    
-                                # Get memory ID from indices (they are string IDs, not integer indices)
-                                memory_id = indices[i]
-                                if memory_id not in self.memories:
-                                    continue
-                                    
-                                tag = new_tags_neighborhood[i]
-                                if i < len(new_context_neighborhood):
-                                    context = new_context_neighborhood[i]
-                                else:
-                                    context = self.memories[memory_id].context
-                                        
-                                # Update the memory directly using its ID
-                                memory_to_update = self.memories[memory_id]
-                                memory_to_update.tags = tag
-                                memory_to_update.context = context
-                                
-                return should_evolve, note
+                # Use the backend-agnostic response processing helper
+                return self._process_evolution_response(response_json, note)
                 
             except (json.JSONDecodeError, KeyError, Exception) as e:
                 logger.error(f"Error in memory evolution: {str(e)}")
