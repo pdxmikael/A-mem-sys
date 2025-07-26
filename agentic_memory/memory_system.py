@@ -165,9 +165,9 @@ class AgenticMemorySystem:
                                
                             For consolidation:
                             - Identify which neighbor memory to consolidate with by using the EXACT "memory id" from the neighbor list (e.g., if you see "memory id:abc123", use "abc123" as consolidate_with_id)
-                            - Create a new consolidated content that integrates both memories intelligently
+                            - Create new consolidated content that integrates important facts from both memories naturally
                             - The consolidated memory should be more complete and informative than either original
-                            - Preserve important information from both memories
+                            - NEVER explain your reasoning or add other meta-commentary to the memory content
                                 
                                 OTHER ACTIONS:
                                 - If choose to strengthen: which memory should it be connected to? Updated tags?
