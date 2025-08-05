@@ -85,7 +85,7 @@ from agentic_memory.memory_system import AgenticMemorySystem
 memory_system = AgenticMemorySystem(
     model_name='all-MiniLM-L6-v2',  # Embedding model for ChromaDB
     llm_backend="openai",           # LLM backend (openai/ollama)
-    llm_model="gpt-4o-mini"         # LLM model name
+    llm_model="gpt-4.1-mini"         # LLM model name
 )
 
 # Add Memories ➕

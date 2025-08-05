@@ -93,7 +93,7 @@ class AgenticMemorySystem:
     def __init__(self, 
                  model_name: str = 'all-MiniLM-L6-v2',
                  llm_backend: str = "openai",
-                 llm_model: str = "gpt-4o-mini",
+                 llm_model: str = "gpt-4.1-mini",
                  evo_threshold: int = 100,
                  api_key: Optional[str] = None,
                  session_id: Optional[str] = None,
@@ -859,7 +859,7 @@ class AgenticMemorySystem:
                     
                     # Prioritize exact matches by adjusting score
                     if memory_dict['content'].strip().lower() == query.strip().lower():
-                        memory_dict['score'] = -1.0  # Best possible score for exact matches
+                        memory_dict['score'] = -1.0  # Best possible score for exact matches (lower distance = better match)
                         
                     memories.append(memory_dict)
                     seen_ids.add(doc_id)
