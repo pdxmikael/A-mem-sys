@@ -36,34 +36,6 @@ class OpenAIController(BaseLLMController):
         )
         return response.choices[0].message.content
 
-class AnthropicController(BaseLLMController):
-    def __init__(self, model: str = "claude-sonnet-4-20250514", api_key: Optional[str] = None):
-        try:
-            import anthropic
-            from anthropic import Anthropic
-            self.model = model
-            if api_key is None:
-                api_key = os.getenv('ANTHROPIC_API_KEY')
-            if api_key is None:
-                raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable.")
-            self.client = Anthropic(api_key=api_key)
-        except ImportError:
-            raise ImportError("Anthropic package not found. Install it with: pip install anthropic")
-    
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
-        # Anthropic doesn't have structured JSON mode like OpenAI, so we'll modify the prompt
-        json_prompt = f"{prompt}\n\nRespond with valid JSON only. Do not include any other text."
-        
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=1000,
-            temperature=temperature,
-            messages=[
-                {"role": "user", "content": json_prompt}
-            ]
-        )
-        return response.content[0].text
-
 class OllamaController(BaseLLMController):
     def __init__(self, model: str = "llama2"):
         from ollama import chat
@@ -114,17 +86,15 @@ class OllamaController(BaseLLMController):
 class LLMController:
     """LLM-based controller for memory metadata generation"""
     def __init__(self, 
-                 backend: Literal["openai", "ollama", "anthropic"] = "openai",
+                 backend: Literal["openai", "ollama"] = "openai",
                  model: str = "gpt-4", 
                  api_key: Optional[str] = None):
         if backend == "openai":
             self.llm = OpenAIController(model, api_key)
         elif backend == "ollama":
             self.llm = OllamaController(model)
-        elif backend == "anthropic":
-            self.llm = AnthropicController(model, api_key)
         else:
-            raise ValueError("Backend must be one of: 'openai', 'ollama', 'anthropic'")
+            raise ValueError("Backend must be one of: 'openai', 'ollama'")
             
     def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
         return self.llm.get_completion(prompt, response_format, temperature)

@@ -34,7 +34,7 @@ class TestAgenticMemorySystem(unittest.TestCase):
             model = default_model if default_model else "claude-3-haiku-20240307"
         elif default_backend == 'openai' and valid_openai_key:
             backend = "openai"
-            model = default_model if default_model else "gpt-4o-mini"
+            model = default_model if default_model else "gpt-4.1-mini"
         elif valid_anthropic_key:
             # Prefer Anthropic if available and no explicit preference
             backend = "anthropic"
@@ -42,7 +42,7 @@ class TestAgenticMemorySystem(unittest.TestCase):
         else:
             # Fall back to OpenAI
             backend = "openai"
-            model = "gpt-4o-mini"
+            model = "gpt-4.1-mini"
             
         self.memory_system = AgenticMemorySystem(
             model_name='all-MiniLM-L6-v2',

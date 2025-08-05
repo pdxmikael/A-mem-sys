@@ -91,132 +91,133 @@ class AgenticMemorySystem:
     """
     
     def __init__(self, 
+                 session_id: str,
                  model_name: str = 'all-MiniLM-L6-v2',
                  llm_backend: str = "openai",
                  llm_model: str = "gpt-4.1-mini",
                  evo_threshold: int = 100,
                  api_key: Optional[str] = None,
-                 session_id: Optional[str] = None,
+                 persist_directory: str = "./memory_db",
                  status_callback = None):  
         """Initialize the memory system.
         
         Args:
+            session_id: Session ID for memory segregation
             model_name: Name of the sentence transformer model
             llm_backend: LLM backend to use (openai/ollama)
             llm_model: Name of the LLM model
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
-            session_id: Optional session ID for memory segregation. If None, generates a new session.
+            persist_directory: Directory to persist ChromaDB data
             status_callback: Optional callback function for status updates during memory operations.
                             Signature: status_callback(message: str, duration: float = 2.0, style: str = "dim cyan")
         """
-        self.session_id = session_id or str(uuid.uuid4())
+        self.session_id = session_id
         self.memories = {}
         self.model_name = model_name
-        self.llm_backend = llm_backend  # Store llm_backend for schema generation
-        self.status_callback = status_callback
-        # Initialize ChromaDB retriever
-        # Note: We don't reset the collection to avoid tenant connection issues
-        # Each test should use its own collection name or clean up properly
-        self.retriever = ChromaRetriever(collection_name="memories",model_name=self.model_name)
+        # Initialize ChromaDB retriever with persistent storage
+        self.retriever = ChromaRetriever(
+            collection_name="memories",
+            model_name=self.model_name,
+            persist_directory=persist_directory
+        )
         
         # Initialize LLM controller
         self.llm_controller = LLMController(llm_backend, llm_model, api_key)
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
-        
-        # Initialize sentence transformer for similarity computation
-        self.embedder = SentenceTransformer(model_name)
+        self.status_callback = status_callback
         
         # Load existing memories for this session
         self._load_session_memories()
 
+    def _load_session_memories(self):
+        """Load all existing memories for the current session from ChromaDB."""
+        try:
+            # Query ChromaDB for all memories with this session_id
+            results = self.retriever.collection.get(
+                where={"session_id": self.session_id},
+                include=["metadatas", "documents"]
+            )
+            
+            if results and results.get('ids'):
+                for i, memory_id in enumerate(results['ids']):
+                    if i < len(results['metadatas']):
+                        raw_metadata = results['metadatas'][i]
+                        content = results['documents'][i] if i < len(results['documents']) else ""
+                        
+                        # Deserialize metadata
+                        metadata = {}
+                        for key, value in raw_metadata.items():
+                            try:
+                                # Try to parse JSON for lists and dicts
+                                if isinstance(value, str) and (value.startswith('[') or value.startswith('{')):
+                                    metadata[key] = json.loads(value)
+                                # Convert numeric strings back to numbers
+                                elif isinstance(value, str) and value.replace('.', '', 1).isdigit():
+                                    if '.' in value:
+                                        metadata[key] = float(value)
+                                    else:
+                                        metadata[key] = int(value)
+                                else:
+                                    metadata[key] = value
+                            except (json.JSONDecodeError, ValueError):
+                                # If parsing fails, keep the original string
+                                metadata[key] = value
+                        
+                        # Recreate MemoryNote from properly deserialized metadata
+                        memory = MemoryNote(
+                            content=content,
+                            id=memory_id,
+                            keywords=metadata.get('keywords', []),
+                            links=metadata.get('links', []),
+                            retrieval_count=metadata.get('retrieval_count', 0),
+                            timestamp=metadata.get('timestamp', datetime.now().isoformat()),
+                            last_accessed=metadata.get('last_accessed', datetime.now().isoformat()),
+                            context=metadata.get('context', ''),
+                            evolution_history=metadata.get('evolution_history', []),
+                            category=metadata.get('category', ''),
+                            tags=metadata.get('tags', [])
+                        )
+                        self.memories[memory_id] = memory
+                        
+                logger.info(f"Loaded {len(self.memories)} memories for session {self.session_id}")
+        except Exception as e:
+            logger.warning(f"Could not load session memories: {str(e)}")
+            # Continue with empty memories if loading fails
+
         # Evolution system prompt
         self._evolution_system_prompt = '''
-                            You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
-                            Analyze the new memory note according to keywords and context, also with their several nearest neighbors memory.
-                            Make decisions about its evolution and whether it should be consolidated with existing memories.
+                                You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
+                                Analyze the the new memory note according to keywords and context, also with their several nearest neighbors memory.
+                                Make decisions about its evolution.  
 
-                            The new memory context:
-                            {context}
-                            content: {content}
-                            keywords: {keywords}
+                                The new memory context:
+                                {context}
+                                content: {content}
+                                keywords: {keywords}
 
-                            The nearest neighbors memories:
-                            {nearest_neighbors_memories}
+                                The nearest neighbors memories:
+                                {nearest_neighbors_memories}
 
-                            Semantic similarity scores between new memory and each neighbor:
-                            {similarity_scores}
-                            (Scores range from 0.0 to 1.0)
-
-                            CONSOLIDATION RULES:
-                            - Strongly consider consolidation if similarity score > 0.8
-                            - Weakly consider consolidation if similarity score > 0.6
-                            - Do not consolidate if similarity score < 0.6
-                            - Consolidate only if memories are on the same topic and one memory is mostly a subset of the other
-                            - When in doubt, DO NOT consolidate
-
-                            Based on this information, determine:
-                            1. Should this memory be evolved? Consider its relationships with other memories.
-                            2. What specific actions should be taken?
-                               - "strengthen": Create stronger connections between memories
-                               - "update_neighbor": Update context and tags of neighboring memories
-                               - "consolidate": Merge with an existing similar memory if appropriate
-                               
-                            For consolidation:
-                            - Identify which neighbor memory to consolidate with by using the EXACT "memory id" from the neighbor list (e.g., if you see "memory id:abc123", use "abc123" as consolidate_with_id)
-                            - Create new consolidated content that integrates important facts from both memories naturally
-                            - The consolidated memory should be more complete and informative than either original
-                            - NEVER explain your reasoning or add other meta-commentary to the memory content
-                                
-                                OTHER ACTIONS:
-                                - If choose to strengthen: which memory should it be connected to? Updated tags?
-                                - If choose to update_neighbor: update context and tags of neighbors in sequential order
-                                
-                            Tags should be determined by the content characteristics for retrieval and categorization.
-                            Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
-                            The number of neighbors is {neighbor_number}.
-                                Tags should be determined by the content characteristics for retrieval and categorization.
+                                Based on this information, determine:
+                                1. Should this memory be evolved? Consider its relationships with other memories.
+                                2. What specific actions should be taken (strengthen, update_neighbor)?
+                                   2.1 If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
+                                   2.2 If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
+                                Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
                                 Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
                                 The number of neighbors is {neighbor_number}.
-                                
                                 Return your decision in JSON format with the following structure:
                                 {{
                                     "should_evolve": True or False,
-                                    "actions": ["strengthen", "update_neighbor", "consolidate"],
-                                    "consolidate_with_id": "memory_id_to_consolidate_with" or null,
-                                    "consolidated_content": "new integrated content" or null,
+                                    "actions": ["strengthen", "update_neighbor"],
                                     "suggested_connections": ["neighbor_memory_ids"],
                                     "tags_to_update": ["tag_1",..."tag_n"], 
                                     "new_context_neighborhood": ["new context",...,"new context"],
                                     "new_tags_neighborhood": [["tag_1",...,"tag_n"],...["tag_1",...,"tag_n"]],
                                 }}
                                 '''
-    
-    def _extract_json_from_response(self, response: str) -> str:
-        """Extract JSON content from response, handling markdown code blocks."""
-        response = response.strip()
-        
-        # Check if response is wrapped in markdown code blocks
-        if response.startswith('```json') and response.endswith('```'):
-            # Extract content between ```json and ```
-            lines = response.split('\n')
-            # Remove first line (```json) and last line (```)
-            json_lines = lines[1:-1]
-            return '\n'.join(json_lines)
-        elif response.startswith('```') and response.endswith('```'):
-            # Extract content between ``` and ``` (generic code block)
-            lines = response.split('\n')
-            # Remove first line (```) and last line (```)
-            json_lines = lines[1:-1]
-            return '\n'.join(json_lines)
-        else:
-            # Return as-is if no markdown formatting
-            return response
-    
-
-
-
         
     def analyze_content(self, content: str) -> Dict:            
         """Analyze content using LLM to extract semantic metadata.
@@ -287,11 +288,9 @@ class AgenticMemorySystem:
                             }
                         }
                     }})
-            # Use robust JSON extraction
-            clean_response = self._extract_json_from_response(response)
-            return json.loads(clean_response)
+            return json.loads(response)
         except Exception as e:
-            # Error analyzing content, returning defaults
+            print(f"Error analyzing content: {e}")
             return {"keywords": [], "context": "General", "tags": []}
 
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
@@ -300,72 +299,87 @@ class AgenticMemorySystem:
         if self.status_callback:
             self.status_callback("Creating new memory...", 2.0, "dim yellow")
             
-        # Create MemoryNote 
+        # Create MemoryNote without llm_controller
         if time is not None:
             kwargs['timestamp'] = time
         note = MemoryNote(content=content, **kwargs)
         
-        # Process memory through evolution system (includes deduplication logic)
+        # 🔧 LLM Analysis Enhancement: Auto-generate attributes using LLM if they are empty or default values
+        needs_analysis = (
+            not note.keywords or  # keywords is empty list
+            note.context == "General" or  # context is default value
+            not note.tags  # tags is empty list
+        )
+        
+        if needs_analysis:
+            try:
+                if self.status_callback:
+                    self.status_callback("Analyzing content with LLM...", 2.5, "dim cyan")
+                analysis = self.analyze_content(content)
+                
+                # Only update attributes that are not provided or have default values
+                if not note.keywords:
+                    note.keywords = analysis.get("keywords", [])
+                if note.context == "General":
+                    note.context = analysis.get("context", "General") 
+                if not note.tags:
+                    note.tags = analysis.get("tags", [])
+                    
+            except Exception as e:
+                print(f"Warning: LLM analysis failed, using default values: {e}")
+                if self.status_callback:
+                    self.status_callback("LLM analysis failed, using defaults", 2.0, "red")
+        
+        # Update retriever with all documents
         if self.status_callback:
             self.status_callback("Processing memory evolution...", 2.5, "dim cyan")
-        evo_result, processed_note = self.process_memory(note)
-        
-        # Check process_memory result for consolidation
-        
-        # Check if evolution system decided to consolidate with existing memory
-        if hasattr(evo_result, 'consolidated_id'):
-            # Return the ID of the consolidated memory instead of creating new one
-            if self.status_callback:
-                self.status_callback("Memory consolidated with existing entry", 2.0, "dim green")
-            return evo_result.consolidated_id
-        
-        # Add new memory if not consolidated
-        if self.status_callback:
-            self.status_callback("Adding memory to storage...", 2.0, "dim cyan")
-        self.memories[processed_note.id] = processed_note
+        evo_label, note = self.process_memory(note)
+        self.memories[note.id] = note
         
         # Add to ChromaDB with complete metadata including session_id
+        if self.status_callback:
+            self.status_callback("Adding memory to storage...", 2.0, "dim cyan")
         metadata = {
-            "id": processed_note.id,
-            "content": processed_note.content,
-            "keywords": processed_note.keywords,
-            "links": processed_note.links,
-            "retrieval_count": processed_note.retrieval_count,
-            "timestamp": processed_note.timestamp,
-            "last_accessed": processed_note.last_accessed,
-            "context": processed_note.context,
-            "evolution_history": processed_note.evolution_history,
-            "category": processed_note.category,
-            "tags": processed_note.tags,
-            "session_id": self.session_id  # Add session namespace
+            "id": note.id,
+            "content": note.content,
+            "keywords": note.keywords,
+            "links": note.links,
+            "retrieval_count": note.retrieval_count,
+            "timestamp": note.timestamp,
+            "last_accessed": note.last_accessed,
+            "context": note.context,
+            "evolution_history": note.evolution_history,
+            "category": note.category,
+            "tags": note.tags,
+            "session_id": self.session_id
         }
-        self.retriever.add_document(processed_note.content, metadata, processed_note.id)
+        self.retriever.add_document(note.content, metadata, note.id)
         
-        if evo_result == True:
+        if evo_label == True:
             self.evo_cnt += 1
             if self.evo_cnt % self.evo_threshold == 0:
                 if self.status_callback:
                     self.status_callback("Triggering memory consolidation...", 3.0, "dim yellow")
                 self.consolidate_memories()
-        
+                
         # Final completion message
         if self.status_callback:
             self.status_callback("Memory created successfully", 2.0, "green")
-        return processed_note.id
+        return note.id
     
     def consolidate_memories(self):
         """Consolidate memories: update retriever with new documents"""
         if self.status_callback:
             self.status_callback("Consolidating related memories...", 3.0, "dim yellow")
             
-        # Get current retriever configuration to preserve settings
-        current_collection_name = getattr(self.retriever, 'collection_name', "memories")
-        current_persist_dir = getattr(self.retriever, 'persist_directory', "./memory_db")
+        # Reset ChromaDB collection
+        self.retriever = ChromaRetriever(
+            collection_name="memories",
+            model_name=self.model_name,
+            persist_directory=self.retriever.persist_directory
+        )
         
-        # Reset ChromaDB collection with same configuration
-        self.retriever = ChromaRetriever(collection_name=current_collection_name, model_name=self.model_name, persist_directory=current_persist_dir)
-        
-        # Re-add all memory documents with their complete metadata
+        # Re-add all memory documents with their complete metadata including session_id
         memory_count = len(self.memories)
         if self.status_callback:
             self.status_callback(f"Rebuilding memory index for {memory_count} memories...", 2.0, "dim cyan")
@@ -383,7 +397,7 @@ class AgenticMemorySystem:
                 "evolution_history": memory.evolution_history,
                 "category": memory.category,
                 "tags": memory.tags,
-                "session_id": self.session_id  # Include session namespace for filtering
+                "session_id": self.session_id
             }
             self.retriever.add_document(memory.content, metadata, memory.id)
         
@@ -392,12 +406,12 @@ class AgenticMemorySystem:
             self.status_callback(f"Consolidated {memory_count} memories", 2.0, "green")
     
     def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[int]]:
-        """Find related memories using ChromaDB retrieval with session-based filtering"""
+        """Find related memories using ChromaDB retrieval with session filtering"""
         if not self.memories:
             return "", []
             
         try:
-            # Get results from ChromaDB filtered by current session
+            # Get results from ChromaDB filtered by session_id
             results = self.retriever.search(query, k, where={"session_id": self.session_id})
             
             # Convert to list of memories
@@ -406,24 +420,24 @@ class AgenticMemorySystem:
             
             if 'ids' in results and results['ids'] and len(results['ids']) > 0 and len(results['ids'][0]) > 0:
                 for i, doc_id in enumerate(results['ids'][0]):
-                    # Only include memories that exist in self.memories (filter out stale ChromaDB entries)
-                    if doc_id in self.memories and i < len(results['metadatas'][0]):
+                    # Get metadata from ChromaDB results
+                    if i < len(results['metadatas'][0]):
                         metadata = results['metadatas'][0][i]
-                        # Format memory string with actual memory ID instead of index
-                        memory_str += f"memory id:{doc_id}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                        indices.append(doc_id)
-                        
+                        # Format memory string
+                        memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
+                        indices.append(i)
+                    
             return memory_str, indices
         except Exception as e:
             logger.error(f"Error in find_related_memories: {str(e)}")
             return "", []
 
     def find_related_memories_raw(self, query: str, k: int = 5) -> str:
-        """Find related memories using ChromaDB retrieval in raw format"""
+        """Find related memories using ChromaDB retrieval in raw format with session filtering"""
         if not self.memories:
             return ""
             
-        # Get results from ChromaDB filtered by current session
+        # Get results from ChromaDB filtered by session_id
         results = self.retriever.search(query, k, where={"session_id": self.session_id})
         
         # Convert to list of memories
@@ -448,195 +462,6 @@ class AgenticMemorySystem:
                             j += 1
                             
         return memory_str
-
-    def _get_evolution_schema(self) -> dict:
-        """Generate evolution schema based on LLM backend capabilities.
-        
-        Returns:
-            dict: JSON schema configuration appropriate for the current backend
-        """
-        base_properties = {
-            "should_evolve": {"type": "boolean"},
-            "actions": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "suggested_connections": {
-                "type": "array", 
-                "items": {"type": "string"}
-            },
-            "new_context_neighborhood": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "tags_to_update": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "new_tags_neighborhood": {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "items": {"type": "string"}
-                }
-            }
-        }
-        
-        # Add consolidation properties
-        base_properties.update({
-            "consolidate_with_id": {"type": ["string", "null"]},
-            "consolidated_content": {"type": ["string", "null"]}
-        })
-        
-        base_required = ["should_evolve", "actions", "suggested_connections", 
-                        "tags_to_update", "new_context_neighborhood", "new_tags_neighborhood"]
-        
-        # OpenAI strict mode requires ALL properties in required array
-        if self.llm_backend == "openai":
-            base_required.extend(["consolidate_with_id", "consolidated_content"])
-            schema_config = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "response",
-                    "schema": {
-                        "type": "object",
-                        "properties": base_properties,
-                        "required": base_required,
-                        "additionalProperties": False
-                    },
-                    "strict": True
-                }
-            }
-        else:  # Anthropic or other backends
-            schema_config = {
-                "type": "json_schema", 
-                "json_schema": {
-                    "name": "response",
-                    "schema": {
-                        "type": "object",
-                        "properties": base_properties,
-                        "required": base_required,
-                        "additionalProperties": False
-                    }
-                }
-            }
-        
-        return schema_config
-
-    def _process_evolution_response(self, response_json: dict, note: MemoryNote) -> tuple:
-        """Process evolution response in a backend-agnostic way.
-        
-        Args:
-            response_json: Parsed JSON response from LLM
-            note: Original memory note
-            
-        Returns:
-            tuple: (should_evolve, processed_note)
-        """
-        should_evolve = response_json.get("should_evolve", False)
-        actions = response_json.get("actions", [])
-        
-        # Report discovered actions
-        if self.status_callback and actions:
-            action_text = ", ".join(actions)
-            self.status_callback(f"Executing: {action_text}", 2.0, "dim cyan")
-        
-        # Handle consolidation logic
-        if "consolidate" in actions:
-            consolidate_with_id = response_json.get("consolidate_with_id")
-            consolidated_content = response_json.get("consolidated_content")
-            
-            # Validate consolidation data regardless of backend
-            if consolidate_with_id and consolidated_content:
-                # Create consolidation result object
-                class ConsolidationResult:
-                    def __init__(self, target_id, content):
-                        self.consolidated_id = target_id
-                        self.consolidated_content = content
-                
-                # Update the target memory with consolidated content and metadata
-                if consolidate_with_id in self.memories:
-                    target_memory = self.memories[consolidate_with_id]
-                    target_memory.content = consolidated_content
-                    
-                    # Extract metadata from LLM response
-                    tags_to_update = response_json.get("tags_to_update", [])
-                    new_context_neighborhood = response_json.get("new_context_neighborhood", [])
-                    new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
-                    
-                    # Merge keywords from multiple sources for comprehensive coverage
-                    consolidated_keywords = set(target_memory.keywords)  # Start with existing keywords
-                    consolidated_keywords.update(note.keywords)  # Add new memory's keywords
-                    if tags_to_update:
-                        consolidated_keywords.update(tags_to_update)  # Add LLM suggestions
-                    if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
-                        consolidated_keywords.update(new_tags_neighborhood[0])  # Add comprehensive keyword list
-                    target_memory.keywords = list(consolidated_keywords)  # Convert back to list
-                    
-                    # Update context from LLM suggestions or keep existing
-                    if new_context_neighborhood and len(new_context_neighborhood) > 0:
-                        target_memory.context = new_context_neighborhood[0]
-                    
-                    # Merge tags from original memory, new memory, and LLM suggestions
-                    consolidated_tags = set(target_memory.tags)  # Start with existing tags
-                    consolidated_tags.update(note.tags)  # Add new memory's tags (CRUCIAL!)
-                    if tags_to_update:
-                        consolidated_tags.update(tags_to_update)  # Add LLM tag suggestions
-                    if new_tags_neighborhood and len(new_tags_neighborhood) > 0 and len(new_tags_neighborhood[0]) > 0:
-                        consolidated_tags.update(new_tags_neighborhood[0])  # Add all tags from LLM
-                    target_memory.tags = list(consolidated_tags)  # Convert back to list
-                    
-                    # Update retriever with new metadata and add session_id
-                    metadata = {
-                        'content': target_memory.content,
-                        'context': target_memory.context,
-                        'keywords': target_memory.keywords,
-                        'tags': target_memory.tags,
-                        'timestamp': target_memory.timestamp,
-                        'category': target_memory.category,
-                        'session_id': self.session_id
-                    }
-                    self.retriever.add_document(target_memory.content, metadata, consolidate_with_id)
-                    
-                    return ConsolidationResult(consolidate_with_id, consolidated_content), note
-        
-        # Handle other evolution actions (only if should_evolve is true)
-        if should_evolve:
-            for action in actions:
-                if action == "strengthen":
-                    suggest_connections = response_json.get("suggested_connections", [])
-                    new_tags = response_json.get("tags_to_update", [])
-                    note.links.extend(suggest_connections)
-                    note.tags = new_tags
-                elif action == "update_neighbor":
-                    new_context_neighborhood = response_json.get("new_context_neighborhood", [])
-                    new_tags_neighborhood = response_json.get("new_tags_neighborhood", [])
-                    
-                    # Get indices from the last find_related_memories call
-                    neighbors_text, indices = self.find_related_memories(note.content, k=5)
-                    
-                    for i in range(min(len(indices), len(new_tags_neighborhood))):
-                        # Skip if we don't have enough neighbors
-                        if i >= len(indices):
-                            continue
-                            
-                        # Get memory ID from indices (they are string IDs, not integer indices)
-                        memory_id = indices[i]
-                        if memory_id not in self.memories:
-                            continue
-                            
-                        tag = new_tags_neighborhood[i]
-                        if i < len(new_context_neighborhood):
-                            context = new_context_neighborhood[i]
-                        else:
-                            context = self.memories[memory_id].context
-                                
-                        # Update the memory directly using its ID
-                        memory_to_update = self.memories[memory_id]
-                        memory_to_update.tags = tag
-                        memory_to_update.context = context
-        
-        return should_evolve, note
 
     def read(self, memory_id: str) -> Optional[MemoryNote]:
         """Retrieve a memory note by its ID.
@@ -689,7 +514,7 @@ class AgenticMemorySystem:
             "evolution_history": note.evolution_history,
             "category": note.category,
             "tags": note.tags,
-            "session_id": self.session_id  # Add session namespace
+            "session_id": self.session_id
         }
         
         # Delete and re-add to update
@@ -716,7 +541,7 @@ class AgenticMemorySystem:
         return False
     
     def _search_raw(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Internal search method that returns raw results from ChromaDB.
+        """Internal search method that returns raw results from ChromaDB with session filtering.
         
         This is used internally by the memory evolution system to find
         related memories for potential evolution.
@@ -728,33 +553,32 @@ class AgenticMemorySystem:
         Returns:
             List[Dict[str, Any]]: Raw search results from ChromaDB
         """
-        results = self.retriever.search(query, k)
+        results = self.retriever.search(query, k, where={"session_id": self.session_id})
         return [{'id': doc_id, 'score': score} 
                 for doc_id, score in zip(results['ids'][0], results['distances'][0])]
                 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for memories using a hybrid retrieval approach."""
-        # Get results from ChromaDB (only do this once) - filter by session_id
+        """Search for memories using a hybrid retrieval approach with session filtering."""
+        # Get results from ChromaDB filtered by session_id
         search_results = self.retriever.search(query, k, where={"session_id": self.session_id})
-        
         memories = []
         
         # Process ChromaDB results
-        if 'ids' in search_results and search_results['ids'] and len(search_results['ids']) > 0:
-            for i, doc_id in enumerate(search_results['ids'][0]):
-                memory = self.memories.get(doc_id)
-                if memory:
-                    memories.append({
-                        'id': doc_id,
-                        'content': memory.content,
-                        'context': memory.context,
-                        'keywords': memory.keywords,
-                        'score': search_results['distances'][0][i]
-                    })
+        for i, doc_id in enumerate(search_results['ids'][0]):
+            memory = self.memories.get(doc_id)
+            if memory:
+                memories.append({
+                    'id': doc_id,
+                    'content': memory.content,
+                    'context': memory.context,
+                    'keywords': memory.keywords,
+                    'score': search_results['distances'][0][i]
+                })
+        
         return memories[:k]
     
     def _search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for memories using a hybrid retrieval approach.
+        """Search for memories using a hybrid retrieval approach with session filtering.
         
         This method combines results from both:
         1. ChromaDB vector store (semantic similarity)
@@ -773,8 +597,8 @@ class AgenticMemorySystem:
                 - score: Similarity score
                 - metadata: Additional memory metadata
         """
-        # Get results from ChromaDB
-        chroma_results = self.retriever.search(query, k)
+        # Get results from ChromaDB filtered by session_id
+        chroma_results = self.retriever.search(query, k, where={"session_id": self.session_id})
         memories = []
         
         # Process ChromaDB results
@@ -789,8 +613,8 @@ class AgenticMemorySystem:
                     'score': chroma_results['distances'][0][i]
                 })
                 
-        # Get results from embedding retriever
-        embedding_results = self.retriever.search(query, k)
+        # Get results from embedding retriever filtered by session_id
+        embedding_results = self.retriever.search(query, k, where={"session_id": self.session_id})
         
         # Combine results with deduplication
         seen_ids = set(m['id'] for m in memories)
@@ -811,18 +635,13 @@ class AgenticMemorySystem:
         return memories[:k]
 
     def search_agentic(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for memories using ChromaDB retrieval with session-based filtering."""
+        """Search for memories using ChromaDB retrieval with session filtering."""
         if not self.memories:
             return []
             
         try:
-            # Build where clause for session filtering
-            where_clause = None
-            if self.session_id:
-                where_clause = {"session_id": self.session_id}
-            
-            # Get results from ChromaDB with session filtering
-            results = self.retriever.search(query, k, where=where_clause)
+            # Get results from ChromaDB filtered by session_id
+            results = self.retriever.search(query, k, where={"session_id": self.session_id})
             
             # Process results
             memories = []
@@ -856,10 +675,6 @@ class AgenticMemorySystem:
                     # Add score if available
                     if 'distances' in results and len(results['distances']) > 0 and i < len(results['distances'][0]):
                         memory_dict['score'] = results['distances'][0][i]
-                    
-                    # Prioritize exact matches by adjusting score
-                    if memory_dict['content'].strip().lower() == query.strip().lower():
-                        memory_dict['score'] = -1.0  # Best possible score for exact matches (lower distance = better match)
                         
                     memories.append(memory_dict)
                     seen_ids.add(doc_id)
@@ -907,7 +722,7 @@ class AgenticMemorySystem:
             note: The memory note to process
             
         Returns:
-            Tuple[bool, MemoryNote]: (should_evolve, processed_note) or (consolidation_result, processed_note)
+            Tuple[bool, MemoryNote]: (should_evolve, processed_note)
         """
         # For first memory or testing, just return the note without evolution
         if not self.memories:
@@ -920,52 +735,126 @@ class AgenticMemorySystem:
             neighbors_text, indices = self.find_related_memories(note.content, k=5)
             if not neighbors_text or not indices:
                 return False, note
+                
+            # Format neighbors for LLM - in this case, neighbors_text is already formatted
             
-            # Compute semantic similarity scores with neighbors
-            similarity_scores = []
-            try:
-                neighbor_contents = []
-                for memory_id in indices:
-                    if memory_id in self.memories:
-                        neighbor_contents.append(self.memories[memory_id].content)
-                
-                if neighbor_contents:
-                    # Encode the new memory content and all neighbor contents
-                    all_contents = [note.content] + neighbor_contents
-                    embeddings = self.embedder.encode(all_contents)
-                    
-                    # Calculate cosine similarity between new memory and each neighbor
-                    for i in range(1, len(embeddings)):
-                        similarity = cosine_similarity([embeddings[0]], [embeddings[i]])[0][0]
-                        similarity_scores.append(f"Memory {indices[i-1]}: {similarity:.3f}")
-            except Exception as e:
-                logger.warning(f"Similarity computation failed: {str(e)}")
-                similarity_scores = ["Similarity computation unavailable"]
-                
             # Query LLM for evolution decision
             if self.status_callback:
                 self.status_callback("Analyzing memory evolution needs...", 3.0, "dim yellow")
-                
             prompt = self._evolution_system_prompt.format(
                 content=note.content,
                 context=note.context,
                 keywords=note.keywords,
                 nearest_neighbors_memories=neighbors_text,
-                neighbor_number=len(indices),
-                similarity_scores="\n".join(similarity_scores)
+                neighbor_number=len(indices)
             )
-
+            
             try:
-                schema_config = self._get_evolution_schema()
                 response = self.llm_controller.llm.get_completion(
                     prompt,
-                    response_format=schema_config
+                    response_format={"type": "json_schema", "json_schema": {
+                        "name": "response",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "should_evolve": {
+                                    "type": "boolean"
+                                },
+                                "actions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "suggested_connections": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "new_context_neighborhood": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "tags_to_update": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "new_tags_neighborhood": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "required": ["should_evolve", "actions", "suggested_connections", 
+                                      "tags_to_update", "new_context_neighborhood", "new_tags_neighborhood"],
+                            "additionalProperties": False
+                        },
+                        "strict": True
+                    }}
                 )
                 
                 response_json = json.loads(response)
+                should_evolve = response_json["should_evolve"]
                 
-                # Use the backend-agnostic response processing helper
-                return self._process_evolution_response(response_json, note)
+                # Report discovered actions
+                if self.status_callback and should_evolve:
+                    actions = response_json.get("actions", [])
+                    if actions:
+                        action_text = ", ".join(actions)
+                        self.status_callback(f"Executing: {action_text}", 2.0, "dim cyan")
+                
+                if should_evolve:
+                    actions = response_json["actions"]
+                    for action in actions:
+                        if action == "strengthen":
+                            suggest_connections = response_json["suggested_connections"]
+                            new_tags = response_json["tags_to_update"]
+                            note.links.extend(suggest_connections)
+                            note.tags = new_tags
+                        elif action == "update_neighbor":
+                            new_context_neighborhood = response_json["new_context_neighborhood"]
+                            new_tags_neighborhood = response_json["new_tags_neighborhood"]
+                            noteslist = list(self.memories.values())
+                            notes_id = list(self.memories.keys())
+                            
+                            for i in range(min(len(indices), len(new_tags_neighborhood))):
+                                # Skip if we don't have enough neighbors
+                                if i >= len(indices):
+                                    continue
+                                    
+                                tag = new_tags_neighborhood[i]
+                                if i < len(new_context_neighborhood):
+                                    context = new_context_neighborhood[i]
+                                else:
+                                    # Since indices are just numbers now, we need to find the memory
+                                    # In memory list using its index number
+                                    if i < len(noteslist):
+                                        context = noteslist[i].context
+                                    else:
+                                        continue
+                                        
+                                # Get index from the indices list
+                                if i < len(indices):
+                                    memorytmp_idx = indices[i]
+                                    # Make sure the index is valid
+                                    if memorytmp_idx < len(noteslist):
+                                        notetmp = noteslist[memorytmp_idx]
+                                        notetmp.tags = tag
+                                        notetmp.context = context
+                                        # Make sure the index is valid
+                                        if memorytmp_idx < len(notes_id):
+                                            self.memories[notes_id[memorytmp_idx]] = notetmp
+                                
+                return should_evolve, note
                 
             except (json.JSONDecodeError, KeyError, Exception) as e:
                 logger.error(f"Error in memory evolution: {str(e)}")
@@ -979,59 +868,3 @@ class AgenticMemorySystem:
             if self.status_callback:
                 self.status_callback("Memory processing failed", 2.0, "red")
             return False, note
-    
-    def _load_session_memories(self):
-        """Load all existing memories for the current session from ChromaDB."""
-        try:
-            # Query ChromaDB for all memories with this session_id
-            # Note: This requires ChromaDB to have stored session_id in metadata
-            results = self.retriever.collection.get(
-                where={"session_id": self.session_id},
-                include=["metadatas", "documents"]
-            )
-            
-            if results and results.get('ids'):
-                for i, memory_id in enumerate(results['ids']):
-                    if i < len(results['metadatas']):
-                        raw_metadata = results['metadatas'][i]
-                        content = results['documents'][i] if i < len(results['documents']) else ""
-                        
-                        # Deserialize metadata - same logic as ChromaRetriever.search()
-                        metadata = {}
-                        for key, value in raw_metadata.items():
-                            try:
-                                # Try to parse JSON for lists and dicts
-                                if isinstance(value, str) and (value.startswith('[') or value.startswith('{')):
-                                    metadata[key] = json.loads(value)
-                                # Convert numeric strings back to numbers
-                                elif isinstance(value, str) and value.replace('.', '', 1).isdigit():
-                                    if '.' in value:
-                                        metadata[key] = float(value)
-                                    else:
-                                        metadata[key] = int(value)
-                                else:
-                                    metadata[key] = value
-                            except (json.JSONDecodeError, ValueError):
-                                # If parsing fails, keep the original string
-                                metadata[key] = value
-                        
-                        # Recreate MemoryNote from properly deserialized metadata
-                        memory = MemoryNote(
-                            content=content,
-                            id=memory_id,
-                            keywords=metadata.get('keywords', []),
-                            links=metadata.get('links', []),
-                            retrieval_count=metadata.get('retrieval_count', 0),
-                            timestamp=metadata.get('timestamp', datetime.now().isoformat()),
-                            last_accessed=metadata.get('last_accessed', datetime.now().isoformat()),
-                            context=metadata.get('context', ''),
-                            evolution_history=metadata.get('evolution_history', []),
-                            category=metadata.get('category', ''),
-                            tags=metadata.get('tags', [])
-                        )
-                        self.memories[memory_id] = memory
-                        
-                logger.info(f"Loaded {len(self.memories)} memories for session {self.session_id}")
-        except Exception as e:
-            logger.warning(f"Could not load session memories: {str(e)}")
-            # Continue with empty memories if loading fails

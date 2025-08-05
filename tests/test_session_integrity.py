@@ -20,9 +20,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import chromadb
-# Test the agentic_memory_refactor module instead of agentic_memory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'agentic_memory_refactor'))
-from agentic_memory_refactor.memory_system import AgenticMemorySystem, MemoryNote
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'agentic_memory'))
+from agentic_memory.memory_system import AgenticMemorySystem, MemoryNote
 
 class TestSessionIntegrity:
     """Test session loading and saving integrity."""

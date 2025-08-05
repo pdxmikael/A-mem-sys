@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, Union
-# from sentence_transformers import SentenceTransformer  # Temporarily disabled
+from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 import nltk
 import numpy as np
@@ -10,19 +10,19 @@ import pickle
 from nltk.tokenize import word_tokenize
 import os
 import json
-# from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction  # Disabled
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 def simple_tokenize(text):
     return word_tokenize(text)
 
 class ChromaRetriever:
     """Vector database retrieval using ChromaDB"""
-    def __init__(self, collection_name: str = "memories",model_name: str = "all-MiniLM-L6-v2", persist_directory: str = "./memory_db"):
+    def __init__(self, collection_name: str = "memories", model_name: str = "all-MiniLM-L6-v2", persist_directory: str = "./memory_db"):
         """Initialize ChromaDB retriever.
         
         Args:
             collection_name: Name of the ChromaDB collection
-            model_name: Name of the embedding model (unused but kept for compatibility)
+            model_name: Name of the embedding model
             persist_directory: Directory to persist ChromaDB data
         """
         # Ensure persist directory exists
