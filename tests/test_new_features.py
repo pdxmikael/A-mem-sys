@@ -7,7 +7,7 @@ from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 from dotenv import load_dotenv
 from agentic_memory.memory_system import AgenticMemorySystem, MemoryNote
-from agentic_memory.llm_controller import LLMController, AnthropicController
+from agentic_memory.llm_controller import LLMController
 
 # Load environment variables from .env file
 load_dotenv()
@@ -53,6 +53,7 @@ class TestNewFeatures(unittest.TestCase):
             model = "gpt-4.1-mini"
             
         self.memory_system = AgenticMemorySystem(
+            session_id="test_session_2",
             model_name='all-MiniLM-L6-v2',
             llm_backend=backend,
             llm_model=model
@@ -84,73 +85,6 @@ class TestNewFeatures(unittest.TestCase):
                 except PermissionError:
                     # Final attempt - just warn if we can't clean up
                     print(f"Warning: Could not clean up temp directory {self.temp_dir}")
-
-    @unittest.skipUnless(os.getenv('ANTHROPIC_API_KEY'), "Anthropic API key not available")
-    def test_anthropic_controller_initialization(self):
-        """Test Anthropic API controller initialization."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
-            with patch('anthropic.Anthropic') as mock_anthropic:
-                # Test controller creation
-                controller = AnthropicController(model="claude-3-5-sonnet-20241022", api_key="test-key")
-                
-                # Verify initialization
-                self.assertEqual(controller.model, "claude-3-5-sonnet-20241022")
-                mock_anthropic.assert_called_once_with(api_key="test-key")
-
-    @unittest.skipUnless(os.getenv('ANTHROPIC_API_KEY'), "Anthropic API key not available")
-    def test_anthropic_llm_controller_backend(self):
-        """Test LLMController with Anthropic backend."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
-            with patch('anthropic.Anthropic'):
-                # Test controller creation with anthropic backend
-                controller = LLMController(
-                    backend="anthropic",
-                    model="claude-3-5-sonnet-20241022",
-                    api_key="test-key"
-                )
-                
-                # Verify it's using AnthropicController
-                self.assertIsInstance(controller.llm, AnthropicController)
-
-    def test_anthropic_memory_system_integration(self):
-        """Test AgenticMemorySystem with Anthropic backend."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
-            with patch('anthropic.Anthropic'):
-                # Create memory system with Anthropic backend
-                memory_system = AgenticMemorySystem(
-                    llm_backend="anthropic",
-                    llm_model="claude-3-5-sonnet-20241022"
-                )
-                
-                # Verify the system was created successfully
-                self.assertIsNotNone(memory_system.llm_controller)
-                self.assertIsInstance(memory_system.llm_controller.llm, AnthropicController)
-
-    @patch('anthropic.Anthropic')
-    def test_anthropic_completion_call(self, mock_anthropic):
-        """Test Anthropic API completion call."""
-        # Mock the Anthropic client response
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].text = '{"keywords": ["test"], "context": "Test context", "tags": ["test"]}'
-        
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        mock_anthropic.return_value = mock_client
-        
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
-            controller = AnthropicController(api_key="test-key")
-            
-            # Test completion call
-            response = controller.get_completion(
-                "Test prompt", 
-                {"type": "json_schema", "json_schema": {"schema": {"type": "object"}}},
-                temperature=0.7
-            )
-            
-            # Verify the call was made
-            mock_client.messages.create.assert_called_once()
-            self.assertIn("keywords", response)
 
     def test_extract_json_from_markdown_response(self):
         """Test robust JSON extraction from markdown-wrapped responses."""

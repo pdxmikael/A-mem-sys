@@ -45,9 +45,10 @@ class TestAgenticMemorySystem(unittest.TestCase):
             model = "gpt-4.1-mini"
             
         self.memory_system = AgenticMemorySystem(
+            session_id="test_session",
             model_name='all-MiniLM-L6-v2',
             llm_backend=backend,
-            llm_model=model
+            llm_model=model,
         )
         
     def test_create_memory(self):
