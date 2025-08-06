@@ -53,8 +53,8 @@ class MemoryNote:
             keywords (Optional[List[str]]): Key terms extracted from the content
             links (Optional[Dict]): References to related memories
             retrieval_count (Optional[int]): Number of times this memory has been accessed
-            timestamp (Optional[str]): Creation time in format YYYYMMDDHHMM
-            last_accessed (Optional[str]): Last access time in format YYYYMMDDHHMM
+            timestamp (Optional[str]): Creation time in ISO‑8601 format
+            last_accessed (Optional[str]): Last access time in ISO‑8601 format
             context (Optional[str]): The broader context or domain of the memory
             evolution_history (Optional[List]): Record of how the memory has evolved
             category (Optional[str]): Classification category
@@ -72,7 +72,7 @@ class MemoryNote:
         self.tags = tags or []
         
         # Temporal information
-        current_time = datetime.now().strftime("%Y%m%d%H%M")
+        current_time = datetime.now().isoformat()
         self.timestamp = timestamp or current_time
         self.last_accessed = last_accessed or current_time
         
