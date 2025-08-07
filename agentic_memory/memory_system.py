@@ -94,7 +94,7 @@ class AgenticMemorySystem:
                  session_id: str,
                  model_name: str = 'all-MiniLM-L6-v2',
                  llm_backend: str = "openai",
-                 llm_model: str = "gpt-4.1-mini",
+                 llm_model: str = "gpt-5-mini",
                  evo_threshold: int = 100,
                  api_key: Optional[str] = None,
                  persist_directory: str = "./memory_db",
@@ -240,7 +240,9 @@ class AgenticMemorySystem:
             1. Identifying the most salient keywords (focus on nouns, verbs, and key concepts)
             2. Extracting core themes and contextual elements
             3. Creating relevant categorical tags
-
+            4. For tags, only use single words or snake_case, UNLESS it is a : delimited two-part tag that ALREADY APPEARS in the content below
+            5. NEVER use the entity_type:entity_id format for tags UNLESS it applies to this content AND already appears in the content below
+            
             Format the response as a JSON object:
             {
                 "keywords": [
