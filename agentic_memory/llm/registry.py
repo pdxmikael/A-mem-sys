@@ -8,6 +8,7 @@ class ModelConfig:
     alias: str
     provider: Provider
     model_id: str  # id used by the underlying SDK (OpenAI or LiteLLM)
+    reasoning: bool = False  # whether model uses reasoning effort instead of temperature
     # Optional future: defaults like temperature, max_tokens, etc.
 
 class ModelRegistry:
@@ -32,7 +33,7 @@ class ModelRegistry:
         ))
         # Add gpt-5-mini alias (OpenAI Responses-capable model)
         self.register(ModelConfig(
-            alias="gpt-5-mini", provider="openai", model_id="gpt-5-mini"
+            alias="gpt-5-mini", provider="openai", model_id="gpt-5-mini", reasoning=True
         ))
         # Anthropic via LiteLLM
         self.register(ModelConfig(
@@ -48,6 +49,13 @@ class ModelRegistry:
 
     def get(self, alias_or_id: str) -> Optional[ModelConfig]:
         return self._models.get(alias_or_id)
+
+    def _is_reasoning_model(self, provider: Provider, model_id: str) -> bool:
+        """Heuristic: OpenAI o1/o3/o4 and gpt-5* models use reasoning effort."""
+        if provider != "openai":
+            return False
+        prefixes = ("o1", "o3", "o4", "gpt-5")
+        return any(model_id.startswith(p) for p in prefixes)
 
     def resolve(self, provider: Optional[Provider], model: Optional[str]) -> ModelConfig:
         """
@@ -79,4 +87,4 @@ class ModelRegistry:
         found2 = self.get(model)
         if found2:
             return found2
-        return ModelConfig(alias=model, provider=provider, model_id=model)
+        return ModelConfig(alias=model, provider=provider, model_id=model, reasoning=self._is_reasoning_model(provider, model))
