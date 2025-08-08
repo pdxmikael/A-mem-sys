@@ -1,5 +1,11 @@
 from typing import Optional, Literal, List
 import os
+# Load environment variables from .env if available
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
 from abc import ABC, abstractmethod
 from .llm.client import LLMClient
 from .llm.types import LLMRequest
@@ -8,8 +14,11 @@ from .llm.types import LLMRequest
 class BaseLLMController(ABC):
     """Abstract base for LLM controllers used in tests and implementations."""
 
+    # Default temperature sourced from env var if present; falls back to 0.3
+    DEFAULT_TEMPERATURE: float = float(os.getenv("AGENTIC_MEMORY_LLM_TEMPERATURE", "0.3"))
+
     @abstractmethod
-    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.3) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = DEFAULT_TEMPERATURE) -> str:
         """Return a completion string for the given prompt."""
         raise NotImplementedError
 
@@ -48,7 +57,7 @@ class LLMController:
                 os.environ.setdefault("OPENROUTER_API_KEY", api_key)
         self.client = LLMClient()
 
-    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.3) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = BaseLLMController.DEFAULT_TEMPERATURE) -> str:
         messages = [
             {"role": "system", "content": "You must respond with a JSON object."},
             {"role": "user", "content": prompt},
