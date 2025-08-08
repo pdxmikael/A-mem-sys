@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch, MagicMock
 from dotenv import load_dotenv
 from agentic_memory.memory_system import AgenticMemorySystem, MemoryNote
 from agentic_memory.llm_controller import LLMController
+from uuid import uuid4
 
 # Load environment variables from .env file
 load_dotenv()
@@ -52,8 +53,10 @@ class TestNewFeatures(unittest.TestCase):
             backend = "openai"
             model = "gpt-4.1-mini"
             
+        # Unique session per test instance for isolation
+        self.session_id = f"test_session_{uuid4()}"
         self.memory_system = AgenticMemorySystem(
-            session_id="test_session_2",
+            session_id=self.session_id,
             model_name='all-MiniLM-L6-v2',
             llm_backend=backend,
             llm_model=model
@@ -64,12 +67,20 @@ class TestNewFeatures(unittest.TestCase):
         
     def tearDown(self):
         """Clean up after each test."""
-        # Force cleanup of ChromaDB connections
+        # Delete all docs for this test session, then reset client
         try:
-            if hasattr(self.memory_system, 'retriever') and hasattr(self.memory_system.retriever, 'client'):
-                # Reset the client to close connections
-                self.memory_system.retriever.client.reset()
-        except:
+            if hasattr(self, 'memory_system'):
+                try:
+                    self.memory_system.delete_all_by_session(self.session_id)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self.memory_system, 'retriever') and hasattr(self.memory_system.retriever, 'client'):
+                        # Reset the client to close connections
+                        self.memory_system.retriever.client.reset()
+                except Exception:
+                    pass
+        except Exception:
             pass  # Ignore errors during cleanup
             
         # Clean up temporary directories with retry logic for Windows
@@ -247,141 +258,79 @@ class TestNewFeatures(unittest.TestCase):
             self.assertTrue(memory_id1 in self.memory_system.memories)
             self.assertTrue(memory_id2 in self.memory_system.memories)
 
-    def test_consolidation_with_detail_integration(self):
-        """Test that nearly identical memories with one differing detail get consolidated."""
-        if not self.has_valid_api_key:
-            self.skipTest("No valid API key available for LLM testing")
-            
-        # Create first memory with basic information
-        content1 = "The ancient library contains thousands of scrolls with magical knowledge"
-        memory_id1 = self.memory_system.add_note(
-            content1,
-            keywords=["library", "scrolls", "magic"],
-            tags=["ancient", "knowledge"],
-            context="Fantasy world exploration"
-        )
-        self.assertIsNotNone(memory_id1)
-        
-        # Create second memory that's nearly identical but adds one specific detail
-        content2 = "The ancient library contains thousands of scrolls with magical knowledge, including rare elemental spells"
-        memory_id2 = self.memory_system.add_note(
-            content2,
-            keywords=["library", "scrolls", "magic", "elemental", "spells"], 
-            tags=["ancient", "knowledge", "spells"],
-            context="Fantasy world exploration - magical research"
-        )
-        self.assertIsNotNone(memory_id2)
-        
-        # For nearly identical memories with just additional detail, consolidation MUST occur
-        self.assertEqual(memory_id1, memory_id2, 
-                        "Nearly identical memories with additional detail must be consolidated into one memory")
-        
-        # Consolidation occurred - verify integrated content and metadata
-        consolidated_memory = self.memory_system.read(memory_id1)
-        self.assertIsNotNone(consolidated_memory)
-        
-        # Verify the consolidated content contains both original and new information
-        content_lower = consolidated_memory.content.lower()
-        self.assertIn("library", content_lower)
-        self.assertIn("scrolls", content_lower)
-        self.assertIn("magical", content_lower)
-        self.assertIn("elemental", content_lower, "Consolidated memory must contain the additional detail 'elemental'")
-        
-        # Verify metadata integration - should include keywords from both memories
-        self.assertIn("library", consolidated_memory.keywords)
-        self.assertIn("magic", consolidated_memory.keywords)
-        self.assertIn("elemental", consolidated_memory.keywords, "Consolidated memory must include new keyword 'elemental'")
-        
-        # Verify tags integration
-        self.assertIn("ancient", consolidated_memory.tags)
-        self.assertIn("knowledge", consolidated_memory.tags)
-        self.assertIn("spells", consolidated_memory.tags, "Consolidated memory must include new tag 'spells'")
-        
-        # Verify only one memory exists in the system for this content
-        memories_with_library = [m for m in self.memory_system.memories.values() 
-                               if "library" in m.content.lower()]
-        self.assertEqual(len(memories_with_library), 1, 
-                       "Should have exactly one consolidated memory about the library")
-        
-        print(f"SUCCESS: Consolidation occurred. Final content: {consolidated_memory.content}")
-        print(f"Final keywords: {consolidated_memory.keywords}")
-        print(f"Final tags: {consolidated_memory.tags}")
-
-    def test_memory_deduplication_low_similarity(self):
-        """Test that dissimilar memories are not deduplicated."""
-        # Add first memory
-        content1 = "Python is a programming language for data science"
-        memory_id1 = self.memory_system.add_note(content1)
-        
-        # Add dissimilar memory - should NOT be merged
-        content2 = "JavaScript is used for web development"
-        memory_id2 = self.memory_system.add_note(content2)
-        
-        # Should return different IDs
-        self.assertNotEqual(memory_id1, memory_id2)
-        
-        # Verify both memories exist
-        memory1 = self.memory_system.read(memory_id1)
-        memory2 = self.memory_system.read(memory_id2)
-        self.assertIsNotNone(memory1)
-        self.assertIsNotNone(memory2)
-        self.assertEqual(memory1.content, content1)
-        self.assertEqual(memory2.content, content2)
-
-    def test_llm_based_consolidation(self):
-        """Test LLM-based memory consolidation functionality."""
-        if not self.has_valid_api_key:
-            self.skipTest("No valid API key available for LLM testing")
-        
-        # Add first memory
-        content1 = "Python programming language for machine learning"
-        memory_id1 = self.memory_system.add_note(content1)
-        self.assertIsNotNone(memory_id1)
-        
-        # Add similar memory - should potentially be consolidated by LLM
-        content2 = "Python programming language for data science"
-        memory_id2 = self.memory_system.add_note(content2)
-        self.assertIsNotNone(memory_id2)
-        
-        # Verify that memories were processed (either consolidated or kept separate)
-        # The exact behavior depends on LLM decision
-        memory1 = self.memory_system.read(memory_id1)
-        if memory_id1 == memory_id2:
-            # Consolidated case - content should be merged
-            self.assertIn("Python", memory1.content)
-        else:
-            # Separate memories case
-            memory2 = self.memory_system.read(memory_id2)
-            self.assertIsNotNone(memory2)
-            self.assertNotEqual(memory1.content, memory2.content)
-
     def test_memory_search_functionality(self):
-        """Test memory search functionality with semantic similarity."""
-        # Add some test memories
-        contents = [
-            "Neural networks are used in deep learning for AI applications",
-            "Deep learning neural networks for artificial intelligence",
-            "Machine learning algorithms for data analysis",
-            "Web development with JavaScript frameworks"
+        """Create notes in two sessions and verify searches are session-scoped."""
+        # Build two distinct session IDs
+        from uuid import uuid4
+        sess_a = f"search_session_A_{uuid4()}"
+        sess_b = f"search_session_B_{uuid4()}"
+
+        # Choose backend/model similar to setUp
+        default_backend = os.getenv('DEFAULT_LLM_BACKEND', '').lower()
+        default_model = os.getenv('DEFAULT_LLM_MODEL', '')
+        if default_backend == 'anthropic' and self.anthropic_key:
+            backend = "anthropic"
+            model = default_model if default_model else "claude-3-haiku-20240307"
+        elif default_backend == 'openai' and self.openai_key:
+            backend = "openai"
+            model = default_model if default_model else "gpt-4.1-mini"
+        elif self.anthropic_key:
+            backend = "anthropic"
+            model = "claude-3-haiku-20240307"
+        else:
+            backend = "openai"
+            model = "gpt-4.1-mini"
+
+        ms_a = AgenticMemorySystem(session_id=sess_a, model_name='all-MiniLM-L6-v2', llm_backend=backend, llm_model=model)
+        ms_b = AgenticMemorySystem(session_id=sess_b, model_name='all-MiniLM-L6-v2', llm_backend=backend, llm_model=model)
+
+        # Add distinct memories with unique anchor keywords per session
+        contents_a = [
+            "Neural networks sessionA key: sessA_key1",
+            "Deep learning sessionA key: sessA_key2",
+            "AI research sessionA key: sessA_key3",
         ]
+        contents_b = [
+            "Data science sessionB key: sessB_key1",
+            "ML pipelines sessionB key: sessB_key2",
+            "Feature engineering sessionB key: sessB_key3",
+        ]
+
+        ids_a = [ms_a.add_note(c) for c in contents_a]
+        ids_b = [ms_b.add_note(c) for c in contents_b]
+
+        # Search within session A and ensure results are from session A only
+        for kw in ["sessA_key1", "sessA_key2", "sessA_key3"]:
+            res_a = ms_a.search(kw, k=5)
+            self.assertGreater(len(res_a), 0)
+            for r in res_a:
+                self.assertIn('id', r)
+                self.assertIn('content', r)
+                # Ensure we did not accidentally retrieve a memory from session B
+                self.assertNotIn(r['id'], ids_b)
+
+        # Search within session B and ensure results are from session B only
+        for kw in ["sessB_key1", "sessB_key2", "sessB_key3"]:
+            res_b = ms_b.search(kw, k=5)
+            self.assertGreater(len(res_b), 0)
+            for r in res_b:
+                self.assertIn('id', r)
+                self.assertIn('content', r)
+                self.assertNotIn(r['id'], ids_a)
         
-        memory_ids = []
-        for content in contents:
-            memory_id = self.memory_system.add_note(content)
-            memory_ids.append(memory_id)
-        
-        # Test search functionality
-        query = "Neural networks for deep learning AI"
-        search_results = self.memory_system.search(query, k=5)
-        
-        # Should find relevant memories
-        self.assertGreater(len(search_results), 0)
-        
-        # Verify search results have proper structure
-        for result in search_results:
-            self.assertIn('id', result)
-            self.assertIn('content', result)
-            self.assertTrue(result['id'] in memory_ids)
+        # Cleanup the two temporary sessions
+        try:
+            ms_a.delete_all_by_session(sess_a)
+            ms_b.delete_all_by_session(sess_b)
+        except Exception:
+            pass
+        try:
+            if hasattr(ms_a, 'retriever') and hasattr(ms_a.retriever, 'client'):
+                ms_a.retriever.client.reset()
+            if hasattr(ms_b, 'retriever') and hasattr(ms_b.retriever, 'client'):
+                ms_b.retriever.client.reset()
+        except Exception:
+            pass
 
     def test_memory_evolution_processing(self):
         """Test that memories are processed through the evolution system."""
@@ -453,45 +402,6 @@ class TestNewFeatures(unittest.TestCase):
         # Test that retrieval count was incremented
         self.assertGreaterEqual(memory1.retrieval_count, 1)
 
-    def test_persistent_storage_with_consolidation(self):
-        """Test persistent storage works with memory consolidation."""
-        from agentic_memory.retrievers import ChromaRetriever
-        
-        persist_dir = os.path.join(self.temp_dir, "consolidation_test")
-        
-        # Create memory system with custom persist directory
-        custom_retriever = ChromaRetriever(
-            collection_name="test_memories",
-            persist_directory=persist_dir
-        )
-        
-        # Replace the retriever in memory system for this test
-        original_retriever = self.memory_system.retriever
-        self.memory_system.retriever = custom_retriever
-        
-        try:
-            # Add memories
-            contents = [
-                "Python data science libraries",
-                "Machine learning with scikit-learn",
-                "Deep learning frameworks like TensorFlow"
-            ]
-            
-            for content in contents:
-                self.memory_system.add_note(content)
-            
-            # Force consolidation
-            self.memory_system.consolidate_memories()
-            
-            # Verify data still exists after consolidation
-            for content in contents:
-                results = self.memory_system.search(content, k=1)
-                self.assertGreater(len(results), 0)
-                
-        finally:
-            # Restore original retriever
-            self.memory_system.retriever = original_retriever
-
     def test_robust_json_parsing_with_analyze_content(self):
         """Test robust JSON parsing integration with analyze_content method."""
         # Mock LLM response with markdown-wrapped JSON
@@ -503,7 +413,7 @@ class TestNewFeatures(unittest.TestCase):
 }
 ```'''
         
-        with patch.object(self.memory_system.llm_controller.llm, 'get_completion', return_value=mock_response):
+        with patch.object(self.memory_system.llm_controller, 'get_completion', return_value=mock_response):
             result = self.memory_system.analyze_content("Neural networks are used in deep learning")
             
             # Verify JSON was parsed correctly

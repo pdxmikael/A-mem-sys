@@ -16,7 +16,6 @@ from transformers import AutoModel, AutoTokenizer
 from nltk.tokenize import word_tokenize
 import pickle
 from pathlib import Path
-from litellm import completion
 import time
 
 logger = logging.getLogger(__name__)
@@ -265,7 +264,7 @@ class AgenticMemorySystem:
             Content for analysis:
             """ + content
         try:
-            response = self.llm_controller.llm.get_completion(prompt, response_format={"type": "json_schema", "json_schema": {
+            response = self.llm_controller.get_completion(prompt, response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
                         "schema": {
                             "type": "object",
@@ -288,10 +287,51 @@ class AgenticMemorySystem:
                             }
                         }
                     }})
-            return json.loads(response)
+            # Robustly extract JSON (handles markdown code fences)
+            extracted = self._extract_json_from_response(response)
+            return json.loads(extracted)
         except Exception as e:
             print(f"Error analyzing content: {e}")
             return {"keywords": [], "context": "General", "tags": []}
+
+    def _extract_json_from_response(self, response_text: str) -> str:
+        """Extract a JSON object string from an LLM response.
+        
+        Handles common wrapping formats such as markdown code fences like:
+        ```json
+        { ... }
+        ```
+        or generic ``` blocks, as well as plain JSON text.
+        """
+        if not isinstance(response_text, str):
+            return "{}"
+        text = response_text.strip()
+
+        # If fenced code block exists, extract content between the first pair of fences
+        if "```" in text:
+            start = text.find("```")
+            end = text.find("```", start + 3)
+            if end != -1:
+                block = text[start + 3:end]
+                # Remove optional language hint like 'json' on the first line
+                block_stripped = block.lstrip()
+                if block_stripped.lower().startswith("json"):
+                    # Drop the first line (language label)
+                    newline_idx = block.find("\n")
+                    if newline_idx != -1:
+                        block = block[newline_idx + 1:]
+                    else:
+                        block = ""
+                return block.strip()
+
+        # Fallback: attempt to slice the first balanced-looking JSON object
+        first = text.find("{")
+        last = text.rfind("}")
+        if first != -1 and last != -1 and last > first:
+            return text[first:last + 1].strip()
+
+        # As a last resort, return the original text
+        return text
 
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
         """Add a new memory note with evolution-based processing"""
@@ -539,6 +579,40 @@ class AgenticMemorySystem:
             del self.memories[memory_id]
             return True
         return False
+
+    def delete_all_by_session(self, session_id: Optional[str] = None) -> int:
+        """Delete all memory notes for a given session from persistent storage.
+
+        This removes all documents in ChromaDB that match the provided session_id
+        filter. If the target session is this instance's session, the in-memory
+        cache (self.memories) will also be cleared.
+
+        Args:
+            session_id: Target session ID. Defaults to the current instance's session.
+
+        Returns:
+            int: Number of documents found for the session (best-effort count).
+        """
+        target_session = session_id or self.session_id
+        deleted_count = 0
+        try:
+            # Best-effort count before deletion
+            results = self.retriever.collection.get(
+                where={"session_id": target_session}
+            )
+            if results and isinstance(results.get('ids'), list):
+                # The `ids` list comes back as a flat list from .get()
+                deleted_count = len(results.get('ids', []))
+
+            # Delete all docs for the session in ChromaDB
+            self.retriever.collection.delete(where={"session_id": target_session})
+
+            # Clear local cache for this session
+            if target_session == self.session_id:
+                self.memories.clear()
+        except Exception as e:
+            logger.error(f"Error deleting session '{target_session}': {str(e)}")
+        return deleted_count
     
     def _search_raw(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Internal search method that returns raw results from ChromaDB with session filtering.
@@ -750,7 +824,7 @@ class AgenticMemorySystem:
             )
             
             try:
-                response = self.llm_controller.llm.get_completion(
+                response = self.llm_controller.get_completion(
                     prompt,
                     response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
