@@ -9,7 +9,7 @@ class BaseLLMController(ABC):
     """Abstract base for LLM controllers used in tests and implementations."""
 
     @abstractmethod
-    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.3) -> str:
         """Return a completion string for the given prompt."""
         raise NotImplementedError
 
@@ -48,7 +48,7 @@ class LLMController:
                 os.environ.setdefault("OPENROUTER_API_KEY", api_key)
         self.client = LLMClient()
 
-    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.3) -> str:
         messages = [
             {"role": "system", "content": "You must respond with a JSON object."},
             {"role": "user", "content": prompt},
