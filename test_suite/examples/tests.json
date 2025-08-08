@@ -1,0 +1,34 @@
+{
+  "k_eval": 5,
+  "metric_weights": {
+    "recall@1": 2.0,
+    "recall@3": 1.0,
+    "recall@5": 0.5,
+    "mrr@5": 2.0,
+    "ndcg@5": 2.0,
+    "spearman": 1.0,
+    "kendall": 1.0
+  },
+  "cases": [
+    {
+      "query": "I cinch my hood and ride for Black Ridge to recover the Echo-7 beacon before the whiteout sweeps Camp Borealis.",
+      "primary_ids": ["note_echo7"],
+      "gains": {
+        "note_echo7": 3,
+        "note_polar_secondary": 2
+      },
+      "desired_order": ["note_echo7", "note_polar_secondary"],
+      "relevant_ids": ["note_echo7", "note_polar_secondary"]
+    },
+    {
+      "query": "I slide the octagonal copper key into the Astronomer’s Guild iris and step into Room Helios to snatch the Seraphim Map fragment before the guard rounds the mezzanine.",
+      "primary_ids": ["note_helios"],
+      "gains": {
+        "note_helios": 3,
+        "note_heist_secondary": 2
+      },
+      "desired_order": ["note_helios", "note_heist_secondary"],
+      "relevant_ids": ["note_helios", "note_heist_secondary"]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "documents": [
+    {
+      "id": "note_echo7",
+      "content": "Echo-7 recovery at Black Ridge before whiteout; bear tracks traced back to Camp Borealis.",
+      "keywords": ["Echo-7", "Black Ridge", "Camp Borealis"],
+      "context": "Polar",
+      "tags": ["polar", "expedition"]
+    },
+    {
+      "id": "note_polar_secondary",
+      "content": "Snowmobile repair; cinch hood; drone haul; base operations in whiteout conditions.",
+      "keywords": ["snowmobile", "drone", "whiteout"],
+      "context": "Polar",
+      "tags": ["polar"]
+    },
+    {
+      "id": "note_helios",
+      "content": "Astronomer’s Guild iris opens to Room Helios; Seraphim Map fragment secured.",
+      "keywords": ["Room Helios", "Seraphim Map", "Astronomer’s Guild"],
+      "context": "Heist",
+      "tags": ["heist"]
+    },
+    {
+      "id": "note_heist_secondary",
+      "content": "Octagonal copper key, mezzanine patrol, timing the guard round.",
+      "keywords": ["key", "mezzanine", "guard"],
+      "context": "Heist",
+      "tags": ["heist"]
+    }
+  ]
+}

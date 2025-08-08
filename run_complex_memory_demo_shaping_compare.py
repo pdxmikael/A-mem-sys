@@ -50,11 +50,33 @@ def format_results(results: Dict[str, Any]) -> List[Tuple[str, float]]:
     return out
 
 
+def _get_shaped_query_text(retriever: ChromaRetriever, query: str) -> str:
+    """Return the semantic_query produced by QueryShaper if available.
+
+    Safe no-op if the shaper isn't present or errors.
+    """
+    shaper = getattr(retriever, "query_shaper", None)
+    if shaper is None:
+        return ""
+    try:
+        shaped = shaper.shape(query)
+        if isinstance(shaped, dict):
+            sq = shaped.get("semantic_query")
+            return str(sq) if sq else ""
+    except Exception:
+        return ""
+    return ""
+
+
 def compare_and_print(ms_with: AgenticMemorySystem, ms_without: AgenticMemorySystem, query: str, k: int = 5, title_suffix: str = "") -> None:
     print_header(f"Distance comparison (lower is closer) -> '{query}' {title_suffix}")
 
     # Run raw retriever queries to ensure we compare the same metric
     where = {"session_id": ms_with.session_id}
+    # Show the rewritten query that will be used by the shaper-backed retriever
+    shaped_query = _get_shaped_query_text(ms_with.retriever, query)
+    if shaped_query:
+        print(json.dumps({"rewritten_query": shaped_query}, ensure_ascii=False, indent=2))
     res_yes = ms_with.retriever.search(query, k=k, where=where)
     res_no = ms_without.retriever.search(query, k=k, where=where)
 
@@ -324,11 +346,19 @@ def main() -> None:
         print_header("Regular search results (no shaper)")
         print(json.dumps(ms_no.search(query1, k=5), indent=2))
         print_header("Regular search results (with shaper)")
+        # Print the rewritten query before searching with the shaper-enabled system
+        shaped_q1 = _get_shaped_query_text(ms_yes.retriever, query1)
+        if shaped_q1:
+            print(json.dumps({"rewritten_query": shaped_q1}, ensure_ascii=False, indent=2))
         print(json.dumps(ms_yes.search(query1, k=5), indent=2))
 
         print_header("Agentic search results (no shaper)")
         print(json.dumps(ms_no.search_agentic(query2, k=5), indent=2))
         print_header("Agentic search results (with shaper)")
+        # Print the rewritten query before agentic search (uses retriever under the hood)
+        shaped_q2 = _get_shaped_query_text(ms_yes.retriever, query2)
+        if shaped_q2:
+            print(json.dumps({"rewritten_query": shaped_q2}, ensure_ascii=False, indent=2))
         print(json.dumps(ms_yes.search_agentic(query2, k=5), indent=2))
 
         # Distance comparisons (retriever raw distances) for both queries

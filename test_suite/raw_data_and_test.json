@@ -1,0 +1,220 @@
+{
+  "notes": [
+    {
+      "id": "note_echo7",
+      "content": "Recovered Echo-7 beacon near Black Ridge; repaired snowmobile fuel line.",
+      "context": "\nThe wind rolled down from the serrated teeth of Black Ridge as a pale wall, scouring the\ncamp in a steady hiss that sifted snow into every zipper and seam. We spent the pre-dawn\nhour at Camp Borealis coaxing the snowmobile back to life, fingers stiff inside mitts as\nI traced the fuel line with a headlamp. The split was hair-thin but long enough to choke\nthe engine under load; a spare length of hose and a double clamp did the trick. By the\ntime the eastern sky bruised purple, the GPS console pulsed with the faint, intermittent\nping of the Echo-7 beacon — our lost scout drone — showing somewhere along a contour just\nsouthwest of the Black Ridge cornice.\n\nThe snow carried a story of its own. Fresh tracks — wide, deliberate, the pads stitched\nwith the faintest starburst of hair — cut across the drainage that led toward the ridge.\nPolar bear, adult, moving with the wind. I marked the bearing and kept my voice low over\nthe radio as I relayed the note to base: “Bear sign near Marker J-12, moving west.” The\nair tasted metallic in my balaclava, and every breath laced the goggles with a soft halo.\n\nWe advanced in short legs, the repaired sled cresting shallow drifts like a seal through\nfoam. At a break in the snow’s crust a glint flashed: not ice, not mica, but the bronze\nbelly of Echo-7, overturned and half-eaten by rime. Its starboard rotor was a thicket of\nshattered carbon, the antenna snapped, but the beacon still tugged at the receiver with a\ndogged, slow heartbeat. I freed it from the drift, read the last telemetry burst, and\nclipped the chassis to the cargo rack. The horizon lowered as the storm front shouldered\ncloser, the ridge sharpening like a saw. We turned for camp, following our own ribs of\ncompressed snow back toward the scatter of crates and the orange dome of the weather tent.\nAs we pulled in, I could hear the anemometer sing like a wire in the wind, a high steady\nnote that meant: not long now. I logged the salvage at 09:42 and marked Black Ridge and\nCamp Borealis on the incident sheet, noting the bear track and the Echo-7 recovery.\n",
+      "keywords": ["Echo-7", "Black Ridge", "Camp Borealis", "snowmobile", "beacon"],
+      "tags": ["arctic", "field_log"],
+      "category": "Expedition"
+    },
+    {
+      "id": "note_helios",
+      "content": "Used octagonal copper key to enter Room Helios; secured Seraphim Map fragment at the Astronomer's Guild.",
+      "context": "\nValeris sleeps uneasily under its hundred domes, the observatories blinking like patient\neyes across the ridge. The Astronomer’s Guild keeps its secrets in a ceramic hive of rooms\nnamed for the sun’s moods — Meridian, Duskfall, Helios — each with its own peculiar lock.\nTonight, the sky was a lacquered bowl and the guard’s boots echoed, predictable as a\nmetronome, along the mezzanine. I timed my breath with his turn. When the lantern halo swept\nthe balustrade, I slid from the shadow beneath the Orrery of Saints and slipped down the\nspiral, a flake among flurries.\n\nRoom Helios wears an iris-lock like a flower clenched against weather. The octagonal copper\nkey, warm from the press of my palm through the cloth, ticked each petal into motion. Eight\nclicks like distant bells, a low sigh of gears, and the aperture dilated to spill a wedge of\nhoney light across the floor. Inside, the Seraphim Map fragment waited in a frame of black\nwalnut, its vellum scored with star-lattice and inked in a dialect that never learned to\nbow. The chart’s southern rim carries the faint watermark of the Maelion Scriptorium: the\nlast proof we need that the Guild hoarded more than star-weather.\n\nI cradled the fragment with paper gloves and rolled it into the bone tube I’d hidden in my\nsash. Behind me, the orrery ticked, brass planets nodding approval as they swam along their\norbits. A clock coughed twice from the archive hall — the guard’s cue for shift change — and\nI eased the iris shut, resetting the petals with a turn that left no trace of brass on brass.\nOutside, the river bit the air and carried it toward the docks. I crossed the Quadrant of\nMeasures, counting flagstones, and tucked myself into the seam of two vaulted buttresses as\nthe lantern passed again. When the bell tower shook out the hour, I was already another face\namong market shadows, copper key quiet in my pocket, Room Helios a memory cooling to silence.\n",
+      "keywords": ["octagonal copper key", "Room Helios", "Seraphim Map", "Astronomer’s Guild"],
+      "tags": ["heist", "valeris"],
+      "category": "Caper"
+    },
+    {
+      "id": "note_spaceport",
+      "content": "Rerouted Kestrel-9 through Service Spine 3 to bypass CL-12; delivered iridium capacitors to Lysa Vorn at Pier Delta.",
+      "context": "\nPier Delta glows a sickly turquoise where the coolant vents bleed into fog, painting the hulls\nin a bruise. Kestrel-9 had been sulking all afternoon, a hairline short in the dorsal conduit\nthrowing phantom alerts across the nav. The customs drone — CL-12, the chatty one with a scuff\non its speaker grille — hovered like a bored gull above the checkpoint, chirping for random\ninspections. The manifest said “machine parts,” but the crate smelled faintly of ozone and a\nminer’s optimism — iridium capacitors, the kind that turn cutters into whispers.\n\nLysa Vorn was late, which meant the window would be small. I dumped power from the fore lights\nand swung the service panel on the bulkhead between bays seven and eight. The Service Spine 3\nis not a passage so much as an apology: ducts, cables, a knee-bruiser of a ladder, and heat\nlike a big cat’s breath. CL-12 hummed toward a new target as I slipped the crate along the\nspine, counting meters in the dim: four, eight, twelve — turn right where the insulation peels.\nA maintenance engineer cursed somewhere above me; a ship’s belly echoed the complaint.\n\nWe came up under a loose grating near the recycler feed. Lysa’s coat flashed tin buttons and a\nsmile sharp enough to cut a seal. “You’re a poem,” she said, and hefted the crate with a grunt\nthat made poetry look like work. I rerouted the Kestrel-9’s power to starboard, dipped thrusters\nto slide past CL-12’s patrol cone, and let the fog finish our sentence. The dockmaster’s board\nblinked green. By the time CL-12 spun back to scold the darkness, we were already a smear of\ncondensation on its lenses and a payment ping in my pocket.\n",
+      "keywords": ["Kestrel-9", "CL-12", "Service Spine 3", "Lysa Vorn", "iridium capacitors", "Pier Delta"],
+      "tags": ["smuggling", "spaceport"],
+      "category": "SciFi"
+    },
+    {
+      "id": "note_village",
+      "content": "Boiled kingsfoil at Old Ashen Well to treat Hobb’s redblight in Brindleford.",
+      "context": "\nBrindleford’s lane is a ribbon of mud plaited with straw, and the mill’s wheel turns with a\ntired slosh that seems to sigh on every rotation. The redblight took Hobb first — a rash like\nautumn maples, fever like a kiln — and then it made a map of his cottage walls with coughs. The\nalmanac says the Witchfen keeps a memory of every illness, and the edge of the fen keeps a plant\nfor every memory, if you pay the right price to the midges and the mud. I took a kettle, a hoop\nof twine, and a satchel with more hope than sense, and went to bargain.\n\nKingsfoil grows where the fen remembers fire. By the Old Ashen Well the birches wear soot like\njewelry and the water tastes a little of thunder. I plucked sprigs until resin turned my palms\ngreen and the air smelled like mended hearts. Back in Brindleford the midwife tapped the kettle\nwith a spoon and called the boil by its proper name, coaxing the steam to carry the herb where it\nmust. Hobb’s breath came easier by inches, then by spans; the red receded like a tide that had\nnever meant to drown the shore. We left a ribbon on the well rope for thanks and a coin in the\nbucket for luck that looks like gratitude.\n",
+      "keywords": ["Brindleford", "kingsfoil", "Old Ashen Well", "redblight", "Hobb"],
+      "tags": ["remedy", "village"],
+      "category": "Fantasy"
+    },
+    {
+      "id": "note_undersea",
+      "content": "Patched helium-argon leak and recovered Aphid-2 near Sable Chimneys; Blue Lantern passed systems check F3-Delta.",
+      "context": "\nPelagia Deep-4 hangs under the black skin of the southern trench, its corridors humming in a key\nyou feel more than hear. The submersible Blue Lantern sulked in Dock Two, sulking as machines do:\na fault code F3-Delta winking like a lazy eye. Outside the viewport the hydrothermal field called\nSable Chimneys exhaled its pale pillars, venting in curtains that folded and unfolded in slow\napplause. Aphid-2 — a probe with pretensions — had gone missing at the edge of the plume, and the\ncomm buoy Sigma had been complaining in clipped bursts about pressure drift and nonsense.\n\nWe bled the lines, checked the regulators, and found the leak by smell more than sound — a thin\nhelium-argon mix that made our voices comic in the mask radios, like the station had decided to\nlaugh at its own joke. Patch laid and cured, Blue Lantern leveled her tone and let me guide her\ninto the dark. The beam cut a cone through snowing silt, and there, cribbed against a basalt lip,\nAphid-2 blinked its wounded green. A manipulator arm scooped it tenderly as a cat rescues a toy,\nand we swung back on a bearing that put the station’s heartbeat back in our bones. Back in Dock\nTwo the diagnostics sang a clean line; F3-Delta turned to a smile. I logged the recovery, the\npatch, and the complaint to Buoy Sigma, which responded, at last, with what I chose to hear as\napproval.\n",
+      "keywords": ["Pelagia Deep-4", "Blue Lantern", "Sable Chimneys", "Aphid-2", "F3-Delta", "Buoy Sigma"],
+      "tags": ["undersea", "research"],
+      "category": "Ocean"
+    },
+    {
+      "id": "note_echo7_followup",
+      "content": "Marked bear den near Marker J-14; relocated Echo-7 flight controller to Borealis lab for teardown.",
+      "context": "\nWhiteout eased to a flurry by noon. South of Black Ridge, cornices had calved in slabs that lay like cards\nflipped by a careless dealer. Near Marker J-14 we found the den: a vent of steam in the drift, hoarfrost\nfeathered above a breathing dark. We flagged it, wide circle, and backed the sleds out on our own tracks.\nEcho-7's flight controller chattered once when we put power on the bench, then fell quiet as if ashamed.\nWe logged the transfer to the Borealis lab for teardown and mapped the den radius as no-go until spring.\n",
+      "keywords": ["Echo-7", "Black Ridge", "Camp Borealis", "bear den", "flight controller"],
+      "tags": ["arctic", "operations"],
+      "category": "Expedition"
+    },
+    {
+      "id": "note_borealis_supply",
+      "content": "Received methane canisters and dried rations from Airlift 22; repaired antenna guy line at Camp Borealis mast.",
+      "context": "\nAirlift 22 ghosted in under the ceiling with rotors snow-muffled, skids kissing the pad and kicking up a halo.\nTwo methane canisters, three crates of dried rations, a sack of letters that smelled like kitchens and ink.\nOn the mast, a guy line had sawn into its collar and frayed itself thin; we spliced it and tuned the tension\nuntil the anemometer sang true again. The storm line on the horizon looked like a graphite smudge.\n",
+      "keywords": ["Airlift 22", "methane canisters", "Camp Borealis", "antenna mast"],
+      "tags": ["arctic", "logistics"],
+      "category": "Expedition"
+    },
+    {
+      "id": "note_valeris_rumor",
+      "content": "Heard at the Quadrant of Measures: a broker seeks the missing southern rim of the Seraphim Map.",
+      "context": "\nValeris markets breathe in murmurs. Under a canopy of tarnished bells, a broker with teeth like spilled pearls\nasked casual questions about vellum with star-lattice and watermarks that only show in river light. The name\nSeraphim perched on the rumor like a wary bird. Payment would clink in foreign cuts. The Guild's shadow felt\nlong even at noon.\n",
+      "keywords": ["Valeris", "Quadrant of Measures", "Seraphim Map", "broker"],
+      "tags": ["heist", "intel"],
+      "category": "Caper"
+    },
+    {
+      "id": "note_guild_countermeasures",
+      "content": "Guild archivists rotated iris-lock codes; Helios now cycling petal order on odd bells.",
+      "context": "\nA junior lantern-keeper let slip that Helios petals no longer open by the old cadence. On odd bells the iris\ncycles two-three-five-seven before yielding; on even it returns to eight. The guards wear new routes, their\nboots drawing unfamiliar geometry on the mezzanine. Someone has been in the rooms and left the air unsettled.\n",
+      "keywords": ["Room Helios", "iris-lock", "petal order", "guard routes"],
+      "tags": ["security", "valeris"],
+      "category": "Caper"
+    },
+    {
+      "id": "note_kestrel_job",
+      "content": "Accepted a quiet haul on Kestrel-9: coolant coils to Outpost Aster in exchange for access codes.",
+      "context": "\nOutpost Aster sits at the edge of traffic, a spine of lights over dark water. The coils clinked in their foam\ncradles like ice in a glass. Lysa Vorn's message arrived in two words — \"clean run\" — and an attachment of codes\nthat tasted of new doors. CL-12 hovered, disappointed to have nothing to scold.\n",
+      "keywords": ["Kestrel-9", "Outpost Aster", "coolant coils", "Lysa Vorn"],
+      "tags": ["transport", "spaceport"],
+      "category": "SciFi"
+    },
+    {
+      "id": "note_undersea_survey",
+      "content": "Mapped a new vent finger east of Sable Chimneys; Aphid-2 telemetry shows thermal oscillation bands.",
+      "context": "\nOn a bearing a shade east of the old plume, the silt rose like breath and settled in silver. The vent finger\nratcheted in pulses, five long, two short, a heartbeat we could measure. Aphid-2's fixed sensor suite came back\nwith oscillation bands that looked like music written for basalt. Blue Lantern approved with a hum steady as prayer.\n",
+      "keywords": ["Sable Chimneys", "Aphid-2", "thermal oscillation", "vent finger"],
+      "tags": ["survey", "undersea"],
+      "category": "Ocean"
+    },
+    {
+      "id": "note_station_quarantine",
+      "content": "Sealed Dock Two for 12 hours after trace contaminants; Buoy Sigma flagged pressure drift anomaly again.",
+      "context": "\nThe station's heartbeat went irregular for an hour: lights stepped instead of flowed, and the air tasted of coins.\nWe blew the lines and let Dock Two sit with the warning strobes washing red over the bulkheads. Buoy Sigma, contrary\nas ever, pinged about pressure drift we couldn't reproduce. I logged it as \"Sigma mood\" and set a reminder.\n",
+      "keywords": ["Dock Two", "Buoy Sigma", "pressure drift", "quarantine"],
+      "tags": ["maintenance", "undersea"],
+      "category": "Ocean"
+    },
+    {
+      "id": "note_bridge_valeris_spaceport",
+      "content": "Smuggled a Helios rubbing offworld via Kestrel-9; Lysa traded a Pier Delta window for a Guild cipher.",
+      "context": "\nThe rubbing took the chalk like skin remembers touch: star-lattice faint but faithful. Folded into oilcloth and\nstitched under the cargo web, it rode Kestrel-9 out past CL-12's bored circles. Lysa Vorn met us at a forgotten\nladder in Service Spine 3, tin buttons catching sickly turquoise light. In exchange for one clean window on Pier\nDelta, I left her a copy of a cipher the Guild pretends not to use. Valeris and the port spoke to each other in\nfog and brass that night.\n",
+      "keywords": ["Room Helios", "Kestrel-9", "Lysa Vorn", "Pier Delta", "cipher"],
+      "tags": ["bridge", "heist", "spaceport"],
+      "category": "Bridge"
+    },
+    {
+      "id": "note_bridge_village_valeris",
+      "content": "Sent kingsfoil tincture to a Valeris apothecary to barter for a star-ink solvent recipe.",
+      "context": "\nThe midwife said the tincture would keep three weeks in glass, longer if the cork remembered rain. We wrapped it\nin straw and tied it under the baker's seat on the river coach. In Valeris, an apothecary with moons tattooed\non her fingers traded us a recipe for dissolving star-ink without bruising the vellum. Back in Brindleford, the\nwell rope wore a new ribbon.\n",
+      "keywords": ["kingsfoil", "Brindleford", "Valeris", "apothecary", "star-ink"],
+      "tags": ["bridge", "remedy", "valeris"],
+      "category": "Bridge"
+    },
+    {
+      "id": "note_bridge_undersea_valeris",
+      "content": "Compared Seraphim star-lattice to Aphid-2 vent map; patterns align with Sable Chimneys oscillation bands.",
+      "context": "\nIn the quiet after shift, I overlaid the Helios fragment's lattice with Aphid-2's thermal bands. Where the map\nplaced asterisms, the vents breathed in five-long, two-short. The Maelion watermark rode the seam like a tide-\nline. If the Guild charted vents as if they were stars, then someone once listened to Sable Chimneys long enough\nto name its music. Valeris owes the trench a footnote.\n",
+      "keywords": ["Seraphim Map", "Aphid-2", "Sable Chimneys", "Maelion Scriptorium"],
+      "tags": ["bridge", "undersea", "valeris"],
+      "category": "Bridge"
+    }
+  ],
+  "tests": {
+    "k_eval": 5,
+    "metric_weights": {
+      "recall@1": 2.0,
+      "recall@3": 1.0,
+      "recall@5": 0.5,
+      "mrr@5": 2.0,
+      "ndcg@5": 2.0,
+      "spearman": 1.0,
+      "kendall": 1.0
+    },
+    "metric_thresholds": {
+      "recall@3": 1.0,
+      "ndcg@5": 0.9
+    },
+    "min_compound": 0.85,
+    "cases": [
+      {
+        "query": "I cinch my hood and ride for Black Ridge to recover the Echo-7 beacon before the whiteout sweeps Camp Borealis.",
+        "primary_ids": ["note_echo7"],
+        "gains": { "note_echo7": 3 },
+        "desired_order": ["note_echo7"],
+        "relevant_ids": ["note_echo7"]
+      },
+      {
+        "query": "I slide the octagonal copper key into the Astronomer’s Guild iris and step into Room Helios to snatch the Seraphim Map fragment before the guard rounds the mezzanine.",
+        "primary_ids": ["note_helios"],
+        "gains": { "note_helios": 3 },
+        "desired_order": ["note_helios"],
+        "relevant_ids": ["note_helios"]
+      },
+      {
+        "query": "I tuck the chalk rubbing from Room Helios under Kestrel-9's cargo web and meet Lysa in Service Spine 3 for a clean Pier Delta window.",
+        "primary_ids": ["note_bridge_valeris_spaceport"],
+        "gains": {
+          "note_bridge_valeris_spaceport": 3,
+          "note_helios": 2,
+          "note_spaceport": 2,
+          "note_kestrel_job": 1
+        },
+        "desired_order": [
+          "note_bridge_valeris_spaceport",
+          "note_helios",
+          "note_spaceport",
+          "note_kestrel_job"
+        ],
+        "relevant_ids": [
+          "note_bridge_valeris_spaceport",
+          "note_helios",
+          "note_spaceport",
+          "note_kestrel_job"
+        ]
+      },
+      {
+        "query": "I overlay the Seraphim fragment with Aphid-2’s vent bands from Sable Chimneys to test the Maelion lattice hypothesis.",
+        "primary_ids": ["note_bridge_undersea_valeris"],
+        "gains": {
+          "note_bridge_undersea_valeris": 3,
+          "note_undersea_survey": 2,
+          "note_undersea": 2,
+          "note_helios": 1
+        },
+        "desired_order": [
+          "note_bridge_undersea_valeris",
+          "note_undersea_survey",
+          "note_undersea",
+          "note_helios"
+        ],
+        "relevant_ids": [
+          "note_bridge_undersea_valeris",
+          "note_undersea_survey",
+          "note_undersea",
+          "note_helios"
+        ]
+      },
+      {
+        "query": "After the whiteout breaks, I flag the bear den near J-14 and haul Echo-7’s flight controller back to the Borealis lab.",
+        "primary_ids": ["note_echo7_followup"],
+        "gains": {
+          "note_echo7_followup": 3,
+          "note_echo7": 2,
+          "note_borealis_supply": 1
+        },
+        "desired_order": [
+          "note_echo7_followup",
+          "note_echo7",
+          "note_borealis_supply"
+        ],
+        "relevant_ids": [
+          "note_echo7_followup",
+          "note_echo7",
+          "note_borealis_supply"
+        ]
+      }
+    ]
+  }
+}

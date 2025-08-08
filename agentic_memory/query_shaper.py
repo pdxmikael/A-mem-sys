@@ -23,7 +23,7 @@ class QueryShaper:
     - Falls back to keyphrase extraction + regex heuristics if spaCy model is missing.
     """
 
-    ENT_LABELS = {"PERSON", "ORG", "GPE", "LOC", "NORP", "WORK_OF_ART"}
+    ENT_LABELS = {"PERSON", "ORG", "GPE", "LOC", "NORP", "WORK_OF_ART", "FAC", "PRODUCT", "EVENT"}
 
     UNRESOLVED_PATTERNS = [
         r"\bneed(s)? to\b",
@@ -138,17 +138,27 @@ class QueryShaper:
         actions = _uniq(actions)
         keyphrases = _uniq(keyphrases)
 
+        # Build a combined keyword pool (entities first to ensure presence)
+        keywords_full: List[str] = _uniq([*entities, *noun_chunks, *keyphrases])
+
         bits: List[str] = []
         if entities:
             bits.append(f"entities: {', '.join(entities)}")
         if actions:
             bits.append(f"actions: {', '.join(actions)}")
+        # Include a short 'keywords' slice in the shaped text to retain discriminators (e.g., Echo-7, Room Helios)
+        if keywords_full:
+            # Prefer proper-ish tokens (capitalized or hyphenated) first, then fill from the rest
+            preferred = [k for k in keywords_full if any(ch.isupper() for ch in k) or "-" in k]
+            kw_for_sem = (preferred[:6] + [k for k in keywords_full if k not in preferred][:6])[:8]
+            if kw_for_sem:
+                bits.append(f"keywords: {', '.join(kw_for_sem)}")
         if unresolved:
             bits.append("status: unresolved goals present")
         semantic_query = " | ".join(bits) if bits else window_text
 
         # Keywords for BM25/sparse search
-        keywords: List[str] = _uniq([*entities, *noun_chunks, *keyphrases])[:40]
+        keywords: List[str] = keywords_full[:40]
 
         # Sub-queries for multi-query retrieval
         sub_queries: List[str] = (entities[:5] if entities else keywords[:5])
