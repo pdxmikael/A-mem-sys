@@ -11,13 +11,17 @@ from nltk.tokenize import word_tokenize
 import os
 import json
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+try:
+    from .query_shaper import QueryShaper
+except Exception:
+    QueryShaper = None  # type: ignore
 
 def simple_tokenize(text):
     return word_tokenize(text)
 
 class ChromaRetriever:
     """Vector database retrieval using ChromaDB"""
-    def __init__(self, collection_name: str = "memories", model_name: str = "all-MiniLM-L6-v2", persist_directory: str = "./memory_db"):
+    def __init__(self, collection_name: str = "memories", model_name: str = "all-MiniLM-L6-v2", persist_directory: str = "./memory_db", use_query_shaper: bool = True):
         """Initialize ChromaDB retriever.
         
         Args:
@@ -51,6 +55,11 @@ class ChromaRetriever:
         # Store configuration for later use
         self.collection_name = collection_name
         self.persist_directory = persist_directory
+        # Optional local query shaping (non-LLM)
+        self.use_query_shaper = use_query_shaper
+        self.query_shaper = (
+            QueryShaper() if (use_query_shaper and 'QueryShaper' in globals() and QueryShaper is not None) else None
+        )
         
     def add_document(self, document: str, metadata: Dict, doc_id: str):
         """Add a document to ChromaDB.
@@ -95,8 +104,20 @@ class ChromaRetriever:
         Returns:
             Dict with documents, metadatas, ids, and distances
         """
+        # Optionally shape the query locally to improve recall for story continuation
+        query_text = query
+        if getattr(self, "query_shaper", None) is not None:
+            try:
+                shaped = self.query_shaper.shape(query)
+                semantic_query = shaped.get("semantic_query") if isinstance(shaped, dict) else None
+                if semantic_query:
+                    query_text = str(semantic_query)
+            except Exception:
+                # Fallback to original query if shaping fails
+                pass
+
         query_params = {
-            "query_texts": [query],
+            "query_texts": [query_text],
             "n_results": k
         }
         
