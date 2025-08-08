@@ -30,6 +30,10 @@ class ModelRegistry:
         self.register(ModelConfig(
             alias="gpt-4.1", provider="openai", model_id="gpt-4.1"
         ))
+        # Add gpt-5-mini alias (OpenAI Responses-capable model)
+        self.register(ModelConfig(
+            alias="gpt-5-mini", provider="openai", model_id="gpt-5-mini"
+        ))
         # Anthropic via LiteLLM
         self.register(ModelConfig(
             alias="claude-3-5-sonnet-20240620", provider="anthropic", model_id="anthropic/claude-3-5-sonnet-20240620"

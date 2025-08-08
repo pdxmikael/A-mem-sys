@@ -7,6 +7,13 @@ from typing import Any, Dict, List, Optional
 from .types import LLMRequest, LLMResult
 from .registry import ModelRegistry, ModelConfig
 
+# Load environment variables from .env if available
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
+
 
 def _messages_to_prompt(messages: List[Dict[str, Any]]) -> str:
     # Simple linearized chat -> prompt string for Responses API when not using structured inputs
@@ -115,6 +122,11 @@ class LLMClient:
             if text is None:
                 text = str(resp)
         except Exception:
+            # If feature flag is set and model is Responses-capable, fail fast
+            disable_fallback = os.getenv("OPENAI_DISABLE_CHAT_FALLBACK", "").lower() in ("1", "true", "yes", "on")
+            responses_capable_models = {"gpt-4.1-mini", "gpt-4o-mini", "gpt-4.1", "gpt-5-mini"}
+            if disable_fallback and cfg.model_id in responses_capable_models:
+                raise
             # Fallback to Chat Completions if Responses path fails
             cc = client.chat.completions.create(
                 model=cfg.model_id,
