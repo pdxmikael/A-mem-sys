@@ -206,6 +206,8 @@ class AgenticMemorySystem:
                                    2.1 If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
                                    2.2 If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
                                 Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
+                                {tag_guardrail}
+                                
                                 Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
                                 The number of neighbors is {neighbor_number}.
                                 Return your decision in JSON format with the following structure:
@@ -253,6 +255,23 @@ class AgenticMemorySystem:
                 out.append(cleaned)
         return out
 
+    def _build_tag_guardrail_block(self, allowed_iter: Iterable[str]) -> str:
+        """Build the reusable guardrail text block with an allowed colon-tag list.
+
+        The block enforces:
+        - Only colon-delimited tags appearing verbatim in the allowed list are permitted.
+        - All other tags must be plain words or snake_case (no colon).
+        - Inventing new colon-delimited tags is an error.
+        """
+        normalized = sorted({(t or "").strip().lower() for t in (allowed_iter or []) if (t or "").strip()})
+        allowed_str = ", ".join(normalized) if normalized else "(none)"
+        return (
+            "            - You may ONLY output a colon-delimited tag if it is listed verbatim under ALLOWED COLON TAGS below AND it clearly applies to this content. Omit them if they do not apply.\n"
+            "            - For all other tags (descriptive themes, properties, attributes), output plain single words or snake_case with NO colon.\n"
+            "            - Introducing a new colon-delimited tag that is not in the ALLOWED COLON TAGS below is an ERROR.\n\n"
+            f"           ALLOWED COLON TAGS (verbatim only): {allowed_str}\n"
+        )
+
     def analyze_content(self, content: str) -> Dict:            
         """Analyze content using LLM to extract semantic metadata.
         
@@ -271,24 +290,20 @@ class AgenticMemorySystem:
                 - tags: List[str]
         """
 
-        # Build prompt with explicit whitelist of allowed colon-form tags (verbatim only)
+        # Build allowed-list (from content here) and encapsulated guardrail block
         allowed_list = self._extract_colon_tags_from_text(content)
-        allowed_str = ", ".join(allowed_list) if allowed_list else "(none)"
-        # 2) Inject it into the prompt (see snippet above)
+        tag_guardrail = self._build_tag_guardrail_block(allowed_list)
 
-        prompt = """Generate a structured analysis of the following content by:
-            1. Identifying the most salient keywords (focus on nouns, verbs, and key concepts)
-            2. Extracting core themes and contextual elements
-            3. Creating relevant categorical tags
-            4. For tags, generally use single words or snake_case
-            5. You may ONLY output a colon-delimited tag if it is listed verbatim under ALLOWED COLON TAGS below AND it clearly applies to this content. Omit them if they do not apply.
-            6. For all other tags (descriptive themes, properties, attributes), output plain single words or snake_case with NO colon.
-            7. Introducing a new colon-delimited tag that is not in the ALLOWED COLON TAGS below is an ERROR.
-            
-            ALLOWED COLON TAGS (verbatim only): """ + allowed_str + """
+        prompt = (
+            """Generate a structured analysis of the following content by:
+            - Identifying the most salient keywords (focus on nouns, verbs, and key concepts)
+            - Extracting core themes and contextual elements
+            - Creating relevant categorical tags
+            - For tags, generally use single words or snake_case
+            {tag_guardrail}
             
             Format the response as a JSON object:
-            {
+            {{
                 "keywords": [
                     // several specific, distinct keywords that capture key concepts and terminology
                     // Order from most to least important
@@ -306,10 +321,11 @@ class AgenticMemorySystem:
                     // Include domain, format, and type tags
                     // At least three tags, but don't be too redundant.
                 ]
-            }
+            }}
             
             Content for analysis:
-            """ + content
+            {content}"""
+        ).format(tag_guardrail=tag_guardrail, content=content)
         try:
             response = self.llm_controller.get_completion(prompt, response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
@@ -862,6 +878,18 @@ class AgenticMemorySystem:
                 
             # Format neighbors for LLM - in this case, neighbors_text is already formatted
             
+            # Build allowed colon tags ONLY from neighbors' existing tag sets (not from content text)
+            noteslist = list(self.memories.values())
+            allowed_set = set()
+            for idx in indices:
+                if 0 <= idx < len(noteslist):
+                    for tg in (noteslist[idx].tags or []):
+                        t = (tg or "").strip().lower()
+                        if ":" in t:
+                            allowed_set.add(t)
+            allowed_list = sorted(allowed_set)
+            tag_guardrail = self._build_tag_guardrail_block(allowed_list)
+
             # Query LLM for evolution decision
             if self.status_callback:
                 self.status_callback("Analyzing memory evolution needs...", 3.0, "dim yellow")
@@ -870,7 +898,8 @@ class AgenticMemorySystem:
                 context=note.context,
                 keywords=note.keywords,
                 nearest_neighbors_memories=neighbors_text,
-                neighbor_number=len(indices)
+                neighbor_number=len(indices),
+                tag_guardrail=tag_guardrail
             )
             
             try:
@@ -928,6 +957,18 @@ class AgenticMemorySystem:
                 
                 response_json = json.loads(response)
                 should_evolve = response_json["should_evolve"]
+
+                # Post-sanitize evolution tag outputs against the allowed colon-tag set
+                allowed_colon_set = set(allowed_list)
+                if "tags_to_update" in response_json:
+                    response_json["tags_to_update"] = self._sanitize_tags_llm_output(
+                        response_json.get("tags_to_update", []), allowed_colon_set
+                    )
+                if "new_tags_neighborhood" in response_json:
+                    response_json["new_tags_neighborhood"] = [
+                        self._sanitize_tags_llm_output(lst, allowed_colon_set)
+                        for lst in response_json.get("new_tags_neighborhood", [])
+                    ]
                 
                 # Report discovered actions
                 if self.status_callback and should_evolve:
