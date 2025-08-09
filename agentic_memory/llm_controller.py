@@ -9,6 +9,7 @@ except Exception:
 from abc import ABC, abstractmethod
 from .llm.client import LLMClient
 from .llm.types import LLMRequest
+from .telemetry import trace_llm_call, set_span_attribute
 
 
 class BaseLLMController(ABC):
@@ -57,6 +58,7 @@ class LLMController:
                 os.environ.setdefault("OPENROUTER_API_KEY", api_key)
         self.client = LLMClient()
 
+    @trace_llm_call("agentic_memory.llm.get_completion")
     def get_completion(self, prompt: str, response_format: dict = None, temperature: float = BaseLLMController.DEFAULT_TEMPERATURE) -> str:
         messages = [
             {"role": "system", "content": "You must respond with a JSON object."},
@@ -70,5 +72,14 @@ class LLMController:
             max_tokens=1000,
             response_format=response_format,
         )
+        # Enrich current span with key params to ensure they are visible even when defaults are used
+        try:
+            set_span_attribute("llm.temperature", float(temperature))
+            set_span_attribute("llm.max_tokens", int(1000))
+            set_span_attribute("llm.messages.count", len(messages))
+            if isinstance(response_format, dict) and "type" in response_format:
+                set_span_attribute("llm.response_format.type", str(response_format.get("type")))
+        except Exception:
+            pass
         result = self.client.generate(req)
         return result.text

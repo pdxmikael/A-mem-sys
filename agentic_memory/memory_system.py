@@ -20,6 +20,7 @@ from pathlib import Path
 import time
 
 logger = logging.getLogger(__name__)
+from .telemetry import trace_function
 
 class MemoryNote:
     """A memory note that represents a single unit of information in the memory system.
@@ -201,15 +202,17 @@ class AgenticMemorySystem:
                                 {nearest_neighbors_memories}
 
                                 Based on this information, determine:
-                                1. Should this memory be evolved? Consider its relationships with other memories.
-                                2. What specific actions should be taken (strengthen, update_neighbor)?
-                                   2.1 If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
-                                   2.2 If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
-                                Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
+                                - Should this memory be evolved? Consider its relationships with other memories.
+                                - What specific actions should be taken (strengthen, update_neighbor)?
+                                  - If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
+                                  - If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
+                                - Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
                                 {tag_guardrail}
-                                
-                                Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
-                                The number of neighbors is {neighbor_number}.
+                                - Preserve any existing colon-delimited tags found in the new memory if they appear in the ALLOWED COLON TAGS list; do not drop or flatten them.
+                                - Do NOT output both a colon-delimited tag and its flat synonym (e.g., character:wind and wind). Prefer the colon-delimited tag if it is allowed.
+                                - Keep the tag list concise and non-redundant (generally 3–7 tags total).
+                                - Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
+                                - The number of neighbors is {neighbor_number}.
                                 Return your decision in JSON format with the following structure:
                                 {{
                                     "should_evolve": True or False,
@@ -399,6 +402,7 @@ class AgenticMemorySystem:
         # As a last resort, return the original text
         return text
 
+    @trace_function("agentic_memory.add_note")
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
         """Add a new memory note with evolution-based processing"""
         # Notify start of memory creation
@@ -526,12 +530,18 @@ class AgenticMemorySystem:
             
             if 'ids' in results and results['ids'] and len(results['ids']) > 0 and len(results['ids'][0]) > 0:
                 for i, doc_id in enumerate(results['ids'][0]):
-                    # Get metadata from ChromaDB results
-                    if i < len(results['metadatas']):
-                        metadata = results['metadatas'][i]
-                        # Format memory string
-                        memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                        neighbor_ids.append(doc_id)
+                    # Get metadata from ChromaDB results (note: metadatas is a list-of-lists for queries)
+                    if (
+                        'metadatas' in results and results['metadatas'] and
+                        len(results['metadatas']) > 0 and i < len(results['metadatas'][0])
+                    ):
+                        raw_meta = results['metadatas'][0][i]
+                        metadata = raw_meta if isinstance(raw_meta, dict) else {}
+                    else:
+                        metadata = {}
+                    # Format memory string
+                    memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
+                    neighbor_ids.append(doc_id)
                     
             return memory_str, neighbor_ids
         except Exception as e:
@@ -551,21 +561,27 @@ class AgenticMemorySystem:
         
         if 'ids' in results and results['ids'] and len(results['ids']) > 0:
             for i, doc_id in enumerate(results['ids'][0][:k]):
-                if i < len(results['metadatas']):
-                    # Get metadata from ChromaDB results
-                    metadata = results['metadatas'][i]
-                    
-                    # Add main memory info
-                    memory_str += f"talk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                    
-                    # Add linked memories if available
-                    links = metadata.get('links', [])
-                    j = 0
-                    for link_id in links:
-                        if link_id in self.memories and j < k:
-                            neighbor = self.memories[link_id]
-                            memory_str += f"talk start time:{neighbor.timestamp}\tmemory content: {neighbor.content}\tmemory context: {neighbor.context}\tmemory keywords: {str(neighbor.keywords)}\tmemory tags: {str(neighbor.tags)}\n"
-                            j += 1
+                if (
+                    'metadatas' in results and results['metadatas'] and
+                    len(results['metadatas']) > 0 and i < len(results['metadatas'][0])
+                ):
+                    # Get metadata from ChromaDB results (list-of-lists)
+                    raw_meta = results['metadatas'][0][i]
+                    metadata = raw_meta if isinstance(raw_meta, dict) else {}
+                else:
+                    metadata = {}
+                
+                # Add main memory info
+                memory_str += f"talk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
+                
+                # Add linked memories if available
+                links = metadata.get('links', [])
+                j = 0
+                for link_id in links:
+                    if link_id in self.memories and j < k:
+                        neighbor = self.memories[link_id]
+                        memory_str += f"talk start time:{neighbor.timestamp}\tmemory content: {neighbor.content}\tmemory context: {neighbor.context}\tmemory keywords: {str(neighbor.keywords)}\tmemory tags: {str(neighbor.tags)}\n"
+                        j += 1
                             
         return memory_str
 
@@ -796,28 +812,36 @@ class AgenticMemorySystem:
             for i, doc_id in enumerate(results['ids'][0][:k]):
                 if doc_id in seen_ids:
                     continue
-                    
-                if i < len(results['metadatas']):
-                    metadata = results['metadatas'][i]
-                    
-                    # Create result dictionary with all metadata fields
-                    memory_dict = {
-                        'id': doc_id,
-                        'content': metadata.get('content', ''),
-                        'context': metadata.get('context', ''),
-                        'keywords': metadata.get('keywords', []),
-                        'tags': metadata.get('tags', []),
-                        'timestamp': metadata.get('timestamp', ''),
-                        'category': metadata.get('category', 'Uncategorized'),
-                        'is_neighbor': False
-                    }
-                    
-                    # Add score if available
-                    if 'distances' in results and len(results['distances']) > 0 and i < len(results['distances'][0]):
-                        memory_dict['score'] = results['distances'][0][i]
-                        
-                    memories.append(memory_dict)
-                    seen_ids.add(doc_id)
+                
+                # Retrieve metadata safely (list-of-lists)
+                if (
+                    'metadatas' in results and results['metadatas'] and
+                    len(results['metadatas']) > 0 and i < len(results['metadatas'][0])
+                ):
+                    raw_meta = results['metadatas'][0][i]
+                    metadata = raw_meta if isinstance(raw_meta, dict) else {}
+                else:
+                    metadata = {}
+                
+                # Create result dictionary with all metadata fields
+                memory_dict = {
+                    'id': doc_id,
+                    'content': metadata.get('content', ''),
+                    'context': metadata.get('context', ''),
+                    'keywords': metadata.get('keywords', []),
+                    'tags': metadata.get('tags', []),
+                    'links': metadata.get('links', []),
+                    'timestamp': metadata.get('timestamp', ''),
+                    'category': metadata.get('category', 'Uncategorized'),
+                    'is_neighbor': False
+                }
+                
+                # Add score if available
+                if 'distances' in results and len(results['distances']) > 0 and i < len(results['distances'][0]):
+                    memory_dict['score'] = results['distances'][0][i]
+                
+                memories.append(memory_dict)
+                seen_ids.add(doc_id)
             
             # Add linked memories (neighbors)
             neighbor_count = 0
@@ -855,6 +879,7 @@ class AgenticMemorySystem:
             logger.error(f"Error in search_agentic: {str(e)}")
             return []
 
+    @trace_function("agentic_memory.process_memory")
     def process_memory(self, note: MemoryNote) -> Tuple[bool, MemoryNote]:
         """Process a memory note and determine if it should evolve.
         
@@ -888,6 +913,11 @@ class AgenticMemorySystem:
                     t = (tg or "").strip().lower()
                     if ":" in t:
                         allowed_set.add(t)
+            # Also include current note's existing colon tags so they are preserved (no flattening)
+            for tg in (note.tags or []):
+                t = (tg or "").strip().lower()
+                if ":" in t:
+                    allowed_set.add(t)
             allowed_list = sorted(allowed_set)
             tag_guardrail = self._build_tag_guardrail_block(allowed_list)
 
@@ -988,10 +1018,8 @@ class AgenticMemorySystem:
                             note.links.extend(suggest_connections)
                             if note.links:
                                 note.links = list(dict.fromkeys(note.links))
-                            # Merge and deduplicate tags, preserving user-provided ones
-                            existing = note.tags or []
-                            merged = list(dict.fromkeys([*(existing or []), *(new_tags or [])]))
-                            note.tags = merged
+                            # Revert: overwrite tags with LLM-proposed set to avoid accumulation
+                            note.tags = new_tags
                         elif action == "update_neighbor":
                             new_context_neighborhood = response_json["new_context_neighborhood"]
                             new_tags_neighborhood = response_json["new_tags_neighborhood"]
@@ -1010,10 +1038,8 @@ class AgenticMemorySystem:
                                 
                                 if neighbor_id in self.memories and context is not None:
                                     notetmp = self.memories[neighbor_id]
-                                    # Merge and deduplicate neighbor tags instead of overwriting
-                                    existing_neighbor_tags = notetmp.tags or []
-                                    merged_neighbor_tags = list(dict.fromkeys([*existing_neighbor_tags, *(tag or [])]))
-                                    notetmp.tags = merged_neighbor_tags
+                                    # Revert: overwrite neighbor tags to avoid accumulation
+                                    notetmp.tags = tag
                                     notetmp.context = context
                                     self.memories[neighbor_id] = notetmp
                                 
