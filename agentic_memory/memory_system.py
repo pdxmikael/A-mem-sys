@@ -527,8 +527,8 @@ class AgenticMemorySystem:
             if 'ids' in results and results['ids'] and len(results['ids']) > 0 and len(results['ids'][0]) > 0:
                 for i, doc_id in enumerate(results['ids'][0]):
                     # Get metadata from ChromaDB results
-                    if i < len(results['metadatas'][0]):
-                        metadata = results['metadatas'][0][i]
+                    if i < len(results['metadatas']):
+                        metadata = results['metadatas'][i]
                         # Format memory string
                         memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
                         neighbor_ids.append(doc_id)
@@ -551,9 +551,9 @@ class AgenticMemorySystem:
         
         if 'ids' in results and results['ids'] and len(results['ids']) > 0:
             for i, doc_id in enumerate(results['ids'][0][:k]):
-                if i < len(results['metadatas'][0]):
+                if i < len(results['metadatas']):
                     # Get metadata from ChromaDB results
-                    metadata = results['metadatas'][0][i]
+                    metadata = results['metadatas'][i]
                     
                     # Add main memory info
                     memory_str += f"talk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
@@ -797,8 +797,8 @@ class AgenticMemorySystem:
                 if doc_id in seen_ids:
                     continue
                     
-                if i < len(results['metadatas'][0]):
-                    metadata = results['metadatas'][0][i]
+                if i < len(results['metadatas']):
+                    metadata = results['metadatas'][i]
                     
                     # Create result dictionary with all metadata fields
                     memory_dict = {
@@ -984,8 +984,14 @@ class AgenticMemorySystem:
                         if action == "strengthen":
                             suggest_connections = response_json["suggested_connections"]
                             new_tags = response_json["tags_to_update"]
+                            # Merge and deduplicate links
                             note.links.extend(suggest_connections)
-                            note.tags = new_tags
+                            if note.links:
+                                note.links = list(dict.fromkeys(note.links))
+                            # Merge and deduplicate tags, preserving user-provided ones
+                            existing = note.tags or []
+                            merged = list(dict.fromkeys([*(existing or []), *(new_tags or [])]))
+                            note.tags = merged
                         elif action == "update_neighbor":
                             new_context_neighborhood = response_json["new_context_neighborhood"]
                             new_tags_neighborhood = response_json["new_tags_neighborhood"]
@@ -1004,7 +1010,10 @@ class AgenticMemorySystem:
                                 
                                 if neighbor_id in self.memories and context is not None:
                                     notetmp = self.memories[neighbor_id]
-                                    notetmp.tags = tag
+                                    # Merge and deduplicate neighbor tags instead of overwriting
+                                    existing_neighbor_tags = notetmp.tags or []
+                                    merged_neighbor_tags = list(dict.fromkeys([*existing_neighbor_tags, *(tag or [])]))
+                                    notetmp.tags = merged_neighbor_tags
                                     notetmp.context = context
                                     self.memories[neighbor_id] = notetmp
                                 
