@@ -511,7 +511,7 @@ class AgenticMemorySystem:
         if self.status_callback:
             self.status_callback(f"Consolidated {memory_count} memories", 2.0, "green")
     
-    def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[int]]:
+    def find_related_memories(self, query: str, k: int = 5) -> Tuple[str, List[str]]:
         """Find related memories using ChromaDB retrieval with session filtering"""
         if not self.memories:
             return "", []
@@ -522,7 +522,7 @@ class AgenticMemorySystem:
             
             # Convert to list of memories
             memory_str = ""
-            indices = []
+            neighbor_ids: List[str] = []
             
             if 'ids' in results and results['ids'] and len(results['ids']) > 0 and len(results['ids'][0]) > 0:
                 for i, doc_id in enumerate(results['ids'][0]):
@@ -531,13 +531,13 @@ class AgenticMemorySystem:
                         metadata = results['metadatas'][0][i]
                         # Format memory string
                         memory_str += f"memory index:{i}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                        indices.append(i)
+                        neighbor_ids.append(doc_id)
                     
-            return memory_str, indices
+            return memory_str, neighbor_ids
         except Exception as e:
             logger.error(f"Error in find_related_memories: {str(e)}")
             return "", []
-
+    
     def find_related_memories_raw(self, query: str, k: int = 5) -> str:
         """Find related memories using ChromaDB retrieval in raw format with session filtering"""
         if not self.memories:
@@ -872,21 +872,22 @@ class AgenticMemorySystem:
             # Get nearest neighbors
             if self.status_callback:
                 self.status_callback("Analyzing memory relationships...", 2.0, "dim cyan")
-            neighbors_text, indices = self.find_related_memories(note.content, k=5)
-            if not neighbors_text or not indices:
+            neighbors_text, neighbor_ids = self.find_related_memories(note.content, k=5)
+            if not neighbors_text or not neighbor_ids:
                 return False, note
                 
             # Format neighbors for LLM - in this case, neighbors_text is already formatted
             
             # Build allowed colon tags ONLY from neighbors' existing tag sets (not from content text)
-            noteslist = list(self.memories.values())
             allowed_set = set()
-            for idx in indices:
-                if 0 <= idx < len(noteslist):
-                    for tg in (noteslist[idx].tags or []):
-                        t = (tg or "").strip().lower()
-                        if ":" in t:
-                            allowed_set.add(t)
+            for neighbor_id in neighbor_ids:
+                mem_obj = self.memories.get(neighbor_id)
+                if not mem_obj:
+                    continue
+                for tg in (mem_obj.tags or []):
+                    t = (tg or "").strip().lower()
+                    if ":" in t:
+                        allowed_set.add(t)
             allowed_list = sorted(allowed_set)
             tag_guardrail = self._build_tag_guardrail_block(allowed_list)
 
@@ -898,7 +899,7 @@ class AgenticMemorySystem:
                 context=note.context,
                 keywords=note.keywords,
                 nearest_neighbors_memories=neighbors_text,
-                neighbor_number=len(indices),
+                neighbor_number=len(neighbor_ids),
                 tag_guardrail=tag_guardrail
             )
             
@@ -988,36 +989,24 @@ class AgenticMemorySystem:
                         elif action == "update_neighbor":
                             new_context_neighborhood = response_json["new_context_neighborhood"]
                             new_tags_neighborhood = response_json["new_tags_neighborhood"]
-                            noteslist = list(self.memories.values())
-                            notes_id = list(self.memories.keys())
                             
-                            for i in range(min(len(indices), len(new_tags_neighborhood))):
-                                # Skip if we don't have enough neighbors
-                                if i >= len(indices):
-                                    continue
-                                    
+                            # Update neighbors by their document IDs to avoid positional-index mismatches
+                            for i in range(min(len(neighbor_ids), len(new_tags_neighborhood))):
+                                neighbor_id = neighbor_ids[i]
                                 tag = new_tags_neighborhood[i]
+                                # Determine context for this neighbor
                                 if i < len(new_context_neighborhood):
                                     context = new_context_neighborhood[i]
                                 else:
-                                    # Since indices are just numbers now, we need to find the memory
-                                    # In memory list using its index number
-                                    if i < len(noteslist):
-                                        context = noteslist[i].context
-                                    else:
-                                        continue
-                                        
-                                # Get index from the indices list
-                                if i < len(indices):
-                                    memorytmp_idx = indices[i]
-                                    # Make sure the index is valid
-                                    if memorytmp_idx < len(noteslist):
-                                        notetmp = noteslist[memorytmp_idx]
-                                        notetmp.tags = tag
-                                        notetmp.context = context
-                                        # Make sure the index is valid
-                                        if memorytmp_idx < len(notes_id):
-                                            self.memories[notes_id[memorytmp_idx]] = notetmp
+                                    # Fallback to existing context if not provided
+                                    existing = self.memories.get(neighbor_id)
+                                    context = existing.context if existing else None
+                                
+                                if neighbor_id in self.memories and context is not None:
+                                    notetmp = self.memories[neighbor_id]
+                                    notetmp.tags = tag
+                                    notetmp.context = context
+                                    self.memories[neighbor_id] = notetmp
                                 
                 return should_evolve, note
                 
