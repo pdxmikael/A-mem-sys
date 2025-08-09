@@ -1,10 +1,11 @@
 import keyword
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Set, Iterable
 import uuid
 from datetime import datetime
 from .llm_controller import LLMController
 from .retrievers import ChromaRetriever
 import json
+import re
 import logging
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
@@ -217,7 +218,41 @@ class AgenticMemorySystem:
                                     "new_tags_neighborhood": [["tag_1",...,"tag_n"],...["tag_1",...,"tag_n"]],
                                 }}
                                 '''
-        
+
+    _COLON_TAG_RE = re.compile(r"\b[a-z][a-z0-9_]*:[a-z0-9_]+\b")
+
+    # --- Tagging guardrail helpers -------------------------------------------------
+    @staticmethod
+    def _extract_colon_tags_from_text(text: Optional[str]) -> List[str]:
+        """Find distinct verbatim type:id tokens in text (lowercased)."""
+        if not text:
+            return []
+        found = set(re.findall(r"\b[a-z][a-z0-9_]*:[a-z0-9_]+\b", text.lower()))
+        return sorted(found)
+
+    @staticmethod
+    def _sanitize_tags_llm_output(tags: List[str], allowed_colon: Set[str]) -> List[str]:
+        """Keep colon tags only if verbatim-allowed; otherwise convert 'x:y' → 'y' as plain snake_case."""
+        out: List[str] = []
+        seen: Set[str] = set()
+        for raw in tags or []:
+            t = (raw or "").strip().lower()
+            if not t:
+                continue
+            if ":" in t:
+                if t in allowed_colon:
+                    cleaned = t
+                else:
+                    cleaned = t.split(":", 1)[1]
+            else:
+                cleaned = t
+            # normalize: keep lowercase ascii with underscores only
+            cleaned = re.sub(r"[^a-z0-9_]+", "_", cleaned)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                out.append(cleaned)
+        return out
+
     def analyze_content(self, content: str) -> Dict:            
         """Analyze content using LLM to extract semantic metadata.
         
@@ -235,12 +270,22 @@ class AgenticMemorySystem:
                 - context: str
                 - tags: List[str]
         """
+
+        # Build prompt with explicit whitelist of allowed colon-form tags (verbatim only)
+        allowed_list = self._extract_colon_tags_from_text(content)
+        allowed_str = ", ".join(allowed_list) if allowed_list else "(none)"
+        # 2) Inject it into the prompt (see snippet above)
+
         prompt = """Generate a structured analysis of the following content by:
             1. Identifying the most salient keywords (focus on nouns, verbs, and key concepts)
             2. Extracting core themes and contextual elements
             3. Creating relevant categorical tags
-            4. For tags, only use single words or snake_case, UNLESS it is a : delimited two-part tag that ALREADY APPEARS in the content below
-            5. NEVER use the entity_type:entity_id format for tags UNLESS it applies to this content AND already appears in the content below
+            4. For tags, generally use single words or snake_case
+            5. You may ONLY output a colon-delimited tag if it is listed verbatim under ALLOWED COLON TAGS below AND it clearly applies to this content. Omit them if they do not apply.
+            6. For all other tags (descriptive themes, properties, attributes), output plain single words or snake_case with NO colon.
+            7. Introducing a new colon-delimited tag that is not in the ALLOWED COLON TAGS below is an ERROR.
+            
+            ALLOWED COLON TAGS (verbatim only): """ + allowed_str + """
             
             Format the response as a JSON object:
             {
@@ -262,7 +307,7 @@ class AgenticMemorySystem:
                     // At least three tags, but don't be too redundant.
                 ]
             }
-
+            
             Content for analysis:
             """ + content
         try:
@@ -291,7 +336,10 @@ class AgenticMemorySystem:
                     }})
             # Robustly extract JSON (handles markdown code fences)
             extracted = self._extract_json_from_response(response)
-            return json.loads(extracted)
+            data = json.loads(extracted)
+            # Post-sanitize tags to enforce whitelist
+            data["tags"] = self._sanitize_tags_llm_output(data.get("tags", []), set(allowed_list))
+            return data
         except Exception as e:
             print(f"Error analyzing content: {e}")
             return {"keywords": [], "context": "General", "tags": []}
